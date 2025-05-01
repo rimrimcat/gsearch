@@ -198,10 +198,3 @@ async fn browser_check() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     Ok(())
 }
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    test_search().await?;
-
-    Ok(())
-}
