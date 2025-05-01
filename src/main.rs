@@ -2,10 +2,12 @@ use fake_user_agent::get_chrome_rua;
 use futures::future::join_all;
 use headless_chrome::{Browser, LaunchOptionsBuilder, Tab};
 use scraper::{Html, Selector};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::error::Error;
 use std::ffi::OsStr;
 use std::sync::Arc;
+use sysinfo::System;
 use tokio::{spawn, task::JoinHandle};
 
 #[derive(Debug, Clone)]
@@ -17,6 +19,38 @@ pub struct SearchResult {
     pub description: String,
     pub updated: String,
     pub page: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct DevToolsInfo {
+    // #[serde(rename = "Browser")]
+    // browser: String,
+    // #[serde(rename = "Protocol-Version")]
+    // protocol_version: String,
+    // #[serde(rename = "User-Agent")]
+    // user_agent: String,
+    // #[serde(rename = "V8-Version")]
+    // v8_version: String,
+    // #[serde(rename = "WebKit-Version")]
+    // webkit_version: String,
+    #[serde(rename = "webSocketDebuggerUrl")]
+    websocket_debugger_url: String,
+}
+
+pub struct TabWrapper {
+    pub tab: Arc<Tab>,
+}
+
+impl TabWrapper {
+    fn new(tab: Arc<Tab>) -> Self {
+        Self { tab }
+    }
+}
+
+impl Drop for TabWrapper {
+    fn drop(&mut self) {
+        let _ = self.tab.close_target();
+    }
 }
 
 pub fn select_element_text(element: &scraper::element_ref::ElementRef, selector: &str) -> String {
@@ -44,6 +78,21 @@ pub fn select_element_attr(
         .to_string()
 }
 
+pub fn check_chromium() -> bool {
+    let mut system = System::new_all();
+    system.refresh_all();
+
+    let target_names = ["chromium", "chromium-browser"];
+
+    for name in target_names.iter() {
+        if system.processes_by_name(OsStr::new(name)).next().is_some() {
+            return true;
+        }
+    }
+
+    false
+}
+
 pub fn spawn_browser() -> Result<Browser, Box<dyn Error + Send + Sync>> {
     let default_options = LaunchOptionsBuilder::default()
         .ignore_default_args(vec![OsStr::new("--enable-automation")])
@@ -53,7 +102,29 @@ pub fn spawn_browser() -> Result<Browser, Box<dyn Error + Send + Sync>> {
     Ok(Browser::new(default_options)?)
 }
 
-pub fn make_new_tab(browser: &Browser) -> Result<Arc<Tab>, Box<dyn Error + Send + Sync>> {
+pub async fn connect_to_browser(port: u16) -> Result<Browser, Box<dyn Error + Send + Sync>> {
+    let fut = spawn(reqwest::get(format!(
+        "http://localhost:{}/json/version",
+        port
+    )))
+    .await?;
+
+    let fut_json: Result<DevToolsInfo, reqwest::Error> = match fut {
+        Ok(_) => fut.unwrap().json().await,
+        Err(_) => return Err("Failed to connect to browser".into()),
+    };
+
+    let res = match fut_json {
+        Ok(_) => fut_json.unwrap() as DevToolsInfo,
+        Err(_) => return Err("Failed to connect to browser".into()),
+    };
+
+    let browser = Browser::connect(res.websocket_debugger_url)?;
+
+    Ok(browser)
+}
+
+pub fn make_new_tab(browser: &Browser) -> Result<TabWrapper, Box<dyn Error + Send + Sync>> {
     let custom_user_agent = get_chrome_rua();
 
     let mut headers = HashMap::new();
@@ -63,14 +134,7 @@ pub fn make_new_tab(browser: &Browser) -> Result<Arc<Tab>, Box<dyn Error + Send 
     tab.set_extra_http_headers(headers)?;
     tab.enable_stealth_mode()?;
 
-    Ok(tab)
-}
-
-pub fn spawn_browser_and_tab() -> Result<(Browser, Arc<Tab>), Box<dyn Error + Send + Sync>> {
-    let browser = spawn_browser()?;
-    let tab = make_new_tab(&browser)?;
-
-    Ok((browser, tab))
+    Ok(TabWrapper::new(tab))
 }
 
 pub fn google_search(
@@ -159,12 +223,12 @@ pub fn google_search(
 }
 
 pub async fn google_search_async(
-    tab: Arc<Tab>,
+    tabw: TabWrapper,
     query: String,
     page: u32,
     max_results: u32,
 ) -> Vec<SearchResult> {
-    let result = google_search(&tab, &query, page, max_results);
+    let result = google_search(&tabw.tab, &query, page, max_results);
 
     let ret = match result {
         Ok(_) => result,
@@ -186,9 +250,9 @@ fn print_search_results(result: &Vec<SearchResult>) {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let browser = spawn_browser()?;
+// stuff
+async fn test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let browser = connect_to_browser(8928).await?;
 
     let search_queries = vec![
         ("rust", 1, 10),
@@ -202,12 +266,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let browser_ref = browser.clone();
 
         let task = spawn(async move {
-            let tab = make_new_tab(&browser_ref);
-            if tab.is_err() {
+            let tabw = make_new_tab(&browser_ref);
+            if tabw.is_err() {
                 return Vec::new();
             }
 
-            google_search_async(tab.unwrap(), query.to_string(), page, max_results).await
+            google_search_async(tabw.unwrap(), query.to_string(), page, max_results).await
         });
 
         tasks.push(task);
@@ -227,6 +291,32 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             Err(e) => println!("Task {} panicked: {}", i, e),
         }
     }
+
+    Ok(())
+}
+
+async fn browser_check() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let mut system = System::new_all();
+    system.refresh_all();
+
+    // Try matching process names like "chromium", "chromium-browser", etc.
+    let target_names = ["chromium", "chromium-browser"];
+
+    for name in target_names.iter() {
+        if system.processes_by_name(OsStr::new(name)).next().is_some() {
+            println!("Chromium process found.");
+            return Ok(());
+        }
+    }
+
+    println!("Chromium process not found.");
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    test_search().await?;
 
     Ok(())
 }
