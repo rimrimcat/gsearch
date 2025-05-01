@@ -8,7 +8,7 @@ mod browser_utils;
 use browser_utils::{connect_to_browser, make_new_tab};
 
 mod search;
-use search::{SearchResult, google_search_async};
+use search::google_search_async;
 
 #[derive(Deserialize)]
 struct Config {
@@ -49,7 +49,7 @@ async fn init(config_dir: RString) -> State {
 }
 
 #[handler]
-fn handler(selection: Match, state: &State) -> HandleResult {
+fn handler(selection: Match, _state: &State) -> HandleResult {
     if let Err(why) = Command::new("sh")
         .arg("-c")
         .arg(format!("xdg-open \"{}\"", selection.description.unwrap()))
