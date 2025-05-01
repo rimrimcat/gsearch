@@ -7,8 +7,7 @@ use std::sync::Arc;
 use sysinfo::System;
 use tokio::{spawn, task::JoinHandle};
 
-pub mod browser_utils;
-use browser_utils::{
+use crate::browser_utils::{
     TabWrapper, connect_to_browser, make_new_tab, select_element_attr, select_element_text,
 };
 
