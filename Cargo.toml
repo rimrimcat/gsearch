@@ -4,15 +4,18 @@
     version = "0.1.0"
 
 [dependencies]
+    abi_stable = "0.11.1"
+    anyrun-plugin = { path = "../../anyrun-plugin" }
     fake_user_agent = "0.2.1"
     futures = "0.3.31"
     headless_chrome = "1.0.17"
-    reqwest = { version = "0.12.15", features = [
+    reqwest = { version = "0.11.16", features = [
         "blocking",
         "json",
     ] }
+    ron = "0.8.0"
     scraper = "0.23.1"
-    serde = { version = "1.0.219", features = [
+    serde = { version = "1.0.160", features = [
         "derive",
     ] }
     sysinfo = "0.34.2"
