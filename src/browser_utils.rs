@@ -70,7 +70,6 @@ pub fn check_chromium() -> bool {
 pub fn spawn_browser() -> Result<Browser, Box<dyn Error + Send + Sync>> {
     let default_options = LaunchOptionsBuilder::default()
         .ignore_default_args(vec![OsStr::new("--enable-automation")])
-        .headless(false)
         .build()?;
 
     Ok(Browser::new(default_options)?)
@@ -82,6 +81,10 @@ pub async fn connect_to_browser(port: u16) -> Result<Browser, Box<dyn Error + Se
         port
     )))
     .await?;
+
+    if fut.is_err() {
+        return spawn_browser();
+    }
 
     let fut_json: Result<DevToolsInfo, reqwest::Error> = match fut {
         Ok(_) => fut.unwrap().json().await,
