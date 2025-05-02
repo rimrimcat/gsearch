@@ -168,6 +168,19 @@ impl SearchTaskQueue {
             }
         }
     }
+
+    pub async fn stop(&self) {
+        {
+            let mut queue = self.queue.lock().await;
+            queue.clear();
+        }
+
+        if self.is_running.load(Ordering::SeqCst) {
+            self.is_running.store(false, Ordering::SeqCst);
+            self.result_notify.notified().await;
+        }
+        self.tabw.tab.close_target().unwrap();
+    }
 }
 
 pub fn is_captcha(fragment: &Html) -> bool {
@@ -374,6 +387,7 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
     println!("Final result: {:?}", final_result[0].description);
 
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+    task_queue.stop().await;
 
     Ok(())
 }
