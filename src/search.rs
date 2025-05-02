@@ -10,6 +10,7 @@ use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 use sysinfo::System;
 use tokio::sync::{Mutex, Notify};
 use tokio::{spawn, task::JoinHandle};
@@ -51,6 +52,7 @@ pub struct SearchResult {
 #[derive(Clone)]
 pub struct SearchTaskQueue {
     browser: Browser,
+    tabw: TabWrapper,
     queue: Arc<Mutex<VecDeque<QueuedSearchTask>>>,
     result: Arc<RwLock<Vec<SearchResult>>>,
     result_notify: Arc<Notify>,
@@ -60,8 +62,14 @@ pub struct SearchTaskQueue {
 
 impl SearchTaskQueue {
     pub fn new(browser: Browser) -> Self {
+        let _browser = browser.clone();
+
+        #[cfg(debug_assertions)]
+        println!("Browser and tab created.");
+
         Self {
             browser,
+            tabw: make_new_tab(&_browser).unwrap(),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             result: Arc::new(RwLock::new(Vec::new())),
             result_notify: Arc::new(Notify::new()),
@@ -118,10 +126,15 @@ impl SearchTaskQueue {
             };
 
             if let Some(qtask) = maybe_task {
+                #[cfg(debug_assertions)]
+                println!("Starting search: {}", qtask.task.query);
+                #[cfg(debug_assertions)]
+                let start = Instant::now();
+
                 let __last_task_id = qtask.id;
 
                 let new_result = google_search(
-                    make_new_tab(&self.browser).unwrap(),
+                    &self.tabw,
                     qtask.task.query,
                     qtask.task.page,
                     qtask.task.max_results,
@@ -138,6 +151,9 @@ impl SearchTaskQueue {
 
                 self.result_notify.notify_waiters();
 
+                #[cfg(debug_assertions)]
+                println!("Search finished in {}ms", start.elapsed().as_millis());
+
                 let mut queue = self.queue.lock().await;
                 if queue.len() > 1 {
                     // After processing, keep only the last task if there are any
@@ -151,6 +167,19 @@ impl SearchTaskQueue {
                 }
             }
         }
+    }
+
+    pub async fn stop(&self) {
+        {
+            let mut queue = self.queue.lock().await;
+            queue.clear();
+        }
+
+        if self.is_running.load(Ordering::SeqCst) {
+            self.is_running.store(false, Ordering::SeqCst);
+            self.result_notify.notified().await;
+        }
+        self.tabw.tab.close_target().unwrap();
     }
 }
 
@@ -195,6 +224,7 @@ async fn __google_search(
     let html = Html::parse_document(&html_str);
 
     if is_captcha(&html) {
+        #[cfg(debug_assertions)]
         println!("Captcha detected!");
 
         return Ok(vec![SearchResult {
@@ -271,7 +301,7 @@ async fn __google_search(
 }
 
 pub async fn google_search(
-    tabw: TabWrapper,
+    tabw: &TabWrapper,
     query: String,
     page: u32,
     max_results: u32,
@@ -352,10 +382,12 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
         .await;
 
     task_queue.wait_result_update().await;
+
     let final_result = task_queue.get_result();
-    print_search_results(&final_result);
+    println!("Final result: {:?}", final_result[0].description);
 
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+    task_queue.stop().await;
 
     Ok(())
 }
@@ -381,7 +413,7 @@ pub async fn test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
                 return Vec::new();
             }
 
-            google_search(tabw.unwrap(), query.to_string(), page, max_results).await
+            google_search(&tabw.unwrap(), query.to_string(), page, max_results).await
         });
 
         tasks.push(task);
@@ -414,11 +446,13 @@ pub async fn browser_check() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     for name in target_names.iter() {
         if system.processes_by_name(OsStr::new(name)).next().is_some() {
+            #[cfg(debug_assertions)]
             println!("Chromium process found.");
             return Ok(());
         }
     }
 
+    #[cfg(debug_assertions)]
     println!("Chromium process not found.");
 
     Ok(())
