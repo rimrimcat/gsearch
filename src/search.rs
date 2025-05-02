@@ -51,9 +51,9 @@ pub struct SearchResult {
 
 #[derive(Clone)]
 pub struct SearchTaskQueue {
-    browser: Browser,
-    tabw: Arc<TabWrapper>,
+    tab: Arc<Tab>,
     queue: Arc<Mutex<VecDeque<QueuedSearchTask>>>,
+    proc_notify: Arc<Notify>,
     result: Arc<RwLock<Vec<SearchResult>>>,
     result_notify: Arc<Notify>,
     is_running: Arc<AtomicBool>,
@@ -61,16 +61,14 @@ pub struct SearchTaskQueue {
 }
 
 impl SearchTaskQueue {
-    pub fn new(browser: Browser) -> Self {
-        let _browser = browser.clone();
-
+    pub fn new(tab: Arc<Tab>) -> Self {
         #[cfg(debug_assertions)]
         println!("Browser and tab created.");
 
         Self {
-            browser,
-            tabw: Arc::new(make_new_tab(&_browser).unwrap()),
+            tab,
             queue: Arc::new(Mutex::new(VecDeque::new())),
+            proc_notify: Arc::new(Notify::new()),
             result: Arc::new(RwLock::new(Vec::new())),
             result_notify: Arc::new(Notify::new()),
             is_running: Arc::new(AtomicBool::new(false)),
@@ -122,10 +120,12 @@ impl SearchTaskQueue {
             tokio::spawn(async move {
                 processor.run().await;
             });
+        } else {
+            self.proc_notify.notify_waiters();
         }
     }
 
-    async fn run(&self) {
+    async fn run(self) {
         loop {
             let maybe_task = {
                 let mut queue = self.queue.lock().await;
@@ -141,7 +141,7 @@ impl SearchTaskQueue {
                 let __last_task_id = qtask.id;
 
                 let new_result = google_search(
-                    &self.tabw,
+                    &self.tab,
                     qtask.task.query,
                     qtask.task.page,
                     qtask.task.max_results,
@@ -188,7 +188,7 @@ impl SearchTaskQueue {
             self.is_running.store(false, Ordering::SeqCst);
             self.result_notify.notified().await;
         }
-        self.tabw.tab.close_target().unwrap();
+        self.tab.close_target().unwrap();
     }
 }
 
@@ -310,12 +310,12 @@ async fn __google_search(
 }
 
 pub async fn google_search(
-    tabw: &TabWrapper,
+    tab: &Arc<Tab>,
     query: String,
     page: u32,
     max_results: u32,
 ) -> Vec<SearchResult> {
-    let result = __google_search(&tabw.tab, &query, page, max_results).await;
+    let result = __google_search(&tab, &query, page, max_results).await;
 
     let ret = match result {
         Ok(_) => result,
@@ -339,8 +339,9 @@ pub fn print_search_results(result: &Vec<SearchResult>) {
 
 pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
     let browser = connect_to_browser(8928).await?;
+    let tabw = make_new_tab(&browser)?;
 
-    let task_queue = SearchTaskQueue::new(browser);
+    let task_queue = SearchTaskQueue::new(tabw.tab.clone());
 
     task_queue
         .add_task(SearchTask {
@@ -389,7 +390,7 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
     let final_result = task_queue.get_result();
     println!("Final result description: {}", final_result[0].description);
 
-    tokio::time::sleep(std::time::Duration::from_millis(10000)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
 
     task_queue
         .add_task(SearchTask {
@@ -406,7 +407,7 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
     println!("Task 5 result description: {}", final_result[0].description);
 
     tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
-    task_queue.stop().await;
+    // task_queue.stop().await;
 
     Ok(())
 }
@@ -432,7 +433,7 @@ pub async fn test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
                 return Vec::new();
             }
 
-            google_search(&tabw.unwrap(), query.to_string(), page, max_results).await
+            google_search(&tabw.unwrap().tab, query.to_string(), page, max_results).await
         });
 
         tasks.push(task);
