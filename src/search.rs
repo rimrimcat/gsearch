@@ -40,7 +40,7 @@ pub struct SearchResult {
 }
 
 #[derive(Clone)]
-struct SearchTaskQueue {
+pub struct SearchTaskQueue {
     browser: Browser,
     queue: Arc<Mutex<VecDeque<SearchTask>>>,
     notify: Arc<Notify>,
