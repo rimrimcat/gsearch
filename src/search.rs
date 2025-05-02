@@ -30,6 +30,12 @@ pub struct SearchTask {
     pub max_results: u32,
 }
 
+#[derive(Debug)]
+pub struct QueuedSearchTask {
+    pub task: SearchTask,
+    pub id: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct SearchResult {
     pub title: String,
@@ -44,8 +50,7 @@ pub struct SearchResult {
 #[derive(Clone)]
 pub struct SearchTaskQueue {
     browser: Browser,
-    queue: Arc<Mutex<VecDeque<SearchTask>>>,
-    notify: Arc<Notify>,
+    queue: Arc<Mutex<VecDeque<QueuedSearchTask>>>,
     result: Arc<RwLock<Vec<SearchResult>>>,
     result_notify: Arc<Notify>,
     is_running: Arc<AtomicBool>,
@@ -56,17 +61,34 @@ impl SearchTaskQueue {
         Self {
             browser,
             queue: Arc::new(Mutex::new(VecDeque::new())),
-            notify: Arc::new(Notify::new()),
             result: Arc::new(RwLock::new(Vec::new())),
             result_notify: Arc::new(Notify::new()),
             is_running: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    pub async fn add_task(&self, task: SearchTask) {
+    pub async fn add_task(&self, task: SearchTask) -> u32 {
+        let mut id = 0;
+        {
+            let mut queue = self.queue.lock().await;
+            if queue.is_empty() {
+                queue.push_back(QueuedSearchTask { task, id });
+            } else {
+                id = (queue.back().unwrap().id + 1) % 100;
+                queue.push_back(QueuedSearchTask { task, id });
+            }
+        }
+        self.start_processor();
+        id
+    }
+
+    pub async fn get_next_task_id(&self) -> u32 {
         let mut queue = self.queue.lock().await;
-        queue.push_back(task);
-        self.notify.notify_one(); // Wake up the processor
+        if queue.is_empty() {
+            1000
+        } else {
+            queue.back().unwrap().id
+        }
     }
 
     pub fn get_result(&self) -> Vec<SearchResult> {
@@ -92,21 +114,17 @@ impl SearchTaskQueue {
 
     async fn run(self) {
         loop {
-            if self.queue.lock().await.is_empty() {
-                self.notify.notified().await;
-            }
-
             let maybe_task = {
                 let mut queue = self.queue.lock().await;
                 queue.pop_front()
             };
 
-            if let Some(task) = maybe_task {
+            if let Some(qtask) = maybe_task {
                 let new_result = google_search(
                     make_new_tab(&self.browser).unwrap(),
-                    task.query,
-                    task.page,
-                    task.max_results,
+                    qtask.task.query,
+                    qtask.task.page,
+                    qtask.task.max_results,
                 )
                 .await;
 
@@ -117,12 +135,16 @@ impl SearchTaskQueue {
 
                 self.result_notify.notify_waiters();
 
-                // After processing, keep only the last task if there are any
                 let mut queue = self.queue.lock().await;
                 if queue.len() > 1 {
+                    // After processing, keep only the last task if there are any
                     let last = queue.pop_back().unwrap();
                     queue.clear();
                     queue.push_back(last);
+                } else if queue.is_empty() {
+                    // Exit on empty queue
+                    self.is_running.store(false, Ordering::SeqCst);
+                    return;
                 }
             }
         }
