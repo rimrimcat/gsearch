@@ -88,19 +88,11 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
     // check if typing
     *state.current_query.lock().await = input.clone();
 
-    println!(
-        "QUERY:{}, sleeping, will wait for {}ms",
-        input, state.config.type_max_delay
-    );
-
     sleep(Duration::from_millis(state.config.type_max_delay as u64));
 
     if *state.current_query.lock().await != input {
-        println!("typing, not searching");
         return state.last_stored_result.read().await.clone();
     }
-
-    println!("not typing anymore, ig ill do a search for {}", input);
 
     let task_id = state
         .task_queue
