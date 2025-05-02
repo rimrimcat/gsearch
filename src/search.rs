@@ -384,7 +384,7 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
     task_queue.wait_result_update().await;
 
     let final_result = task_queue.get_result();
-    println!("Final result: {:?}", final_result[0].description);
+    println!("Final result description: {}", final_result[0].description);
 
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
     task_queue.stop().await;
