@@ -7,16 +7,6 @@ use tokio::spawn;
 
 #[derive(Debug, Deserialize)]
 pub struct DevToolsInfo {
-    // #[serde(rename = "Browser")]
-    // browser: String,
-    // #[serde(rename = "Protocol-Version")]
-    // protocol_version: String,
-    // #[serde(rename = "User-Agent")]
-    // user_agent: String,
-    // #[serde(rename = "V8-Version")]
-    // v8_version: String,
-    // #[serde(rename = "WebKit-Version")]
-    // webkit_version: String,
     #[serde(rename = "webSocketDebuggerUrl")]
     pub websocket_debugger_url: String,
 }
@@ -80,7 +70,6 @@ pub fn check_chromium() -> bool {
 pub fn spawn_browser() -> Result<Browser, Box<dyn Error + Send + Sync>> {
     let default_options = LaunchOptionsBuilder::default()
         .ignore_default_args(vec![OsStr::new("--enable-automation")])
-        .headless(false)
         .build()?;
 
     Ok(Browser::new(default_options)?)
@@ -92,6 +81,10 @@ pub async fn connect_to_browser(port: u16) -> Result<Browser, Box<dyn Error + Se
         port
     )))
     .await?;
+
+    if fut.is_err() {
+        return spawn_browser();
+    }
 
     let fut_json: Result<DevToolsInfo, reqwest::Error> = match fut {
         Ok(_) => fut.unwrap().json().await,
