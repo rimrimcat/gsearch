@@ -7,16 +7,6 @@ use tokio::spawn;
 
 #[derive(Debug, Deserialize)]
 pub struct DevToolsInfo {
-    // #[serde(rename = "Browser")]
-    // browser: String,
-    // #[serde(rename = "Protocol-Version")]
-    // protocol_version: String,
-    // #[serde(rename = "User-Agent")]
-    // user_agent: String,
-    // #[serde(rename = "V8-Version")]
-    // v8_version: String,
-    // #[serde(rename = "WebKit-Version")]
-    // webkit_version: String,
     #[serde(rename = "webSocketDebuggerUrl")]
     pub websocket_debugger_url: String,
 }
