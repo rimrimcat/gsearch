@@ -49,7 +49,7 @@ pub struct SearchTaskQueue {
 }
 
 impl SearchTaskQueue {
-    fn new(browser: Browser) -> Self {
+    pub fn new(browser: Browser) -> Self {
         Self {
             browser,
             queue: Arc::new(Mutex::new(VecDeque::new())),
@@ -59,21 +59,21 @@ impl SearchTaskQueue {
         }
     }
 
-    async fn add_task(&self, task: SearchTask) {
+    pub async fn add_task(&self, task: SearchTask) {
         let mut queue = self.queue.lock().await;
         queue.push_back(task);
         self.notify.notify_one(); // Wake up the processor
     }
 
-    async fn get_result(&self) -> Vec<SearchResult> {
+    pub async fn get_result(&self) -> Vec<SearchResult> {
         self.result.read().unwrap().clone()
     }
 
-    async fn wait_result_update(&self) {
+    pub async fn wait_result_update(&self) {
         self.result_notify.notified().await;
     }
 
-    async fn run(self) {
+    pub async fn run(self) {
         loop {
             self.notify.notified().await;
 
