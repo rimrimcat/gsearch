@@ -1,14 +1,14 @@
 use abi_stable::std_types::{ROption, RString, RVec};
 use anyrun_plugin::*;
-use headless_chrome::Browser;
 use serde::Deserialize;
-use std::{fs, process::Command};
+use std::{fs, process::Command, sync::Arc};
+use tokio::sync::{Notify, RwLock};
 
 mod browser_utils;
-use browser_utils::{connect_to_browser, make_new_tab};
+use browser_utils::connect_to_browser;
 
 mod search;
-use search::google_search_async;
+use search::{Engines, SearchTask, SearchTaskQueue};
 
 #[derive(Deserialize)]
 struct Config {
@@ -29,7 +29,9 @@ impl Default for Config {
 
 struct State {
     config: Config,
-    browser: Browser,
+    task_queue: SearchTaskQueue,
+    last_stored_result: Arc<RwLock<RVec<Match>>>,
+    result_notify: Arc<Notify>,
 }
 
 #[init]
@@ -41,10 +43,13 @@ async fn init(config_dir: RString) -> State {
     };
 
     let port = config.port;
+    let task_queue = SearchTaskQueue::new((connect_to_browser(port)).await.unwrap());
 
     State {
         config,
-        browser: (connect_to_browser(port)).await.unwrap(),
+        task_queue,
+        last_stored_result: Arc::new(RwLock::new(RVec::new())),
+        result_notify: Arc::new(Notify::new()),
     }
 }
 
@@ -69,24 +74,56 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
     }
 
     let input = input.replace(&state.config.prefix, "");
-    if input.is_empty() {
+    if input.is_empty() || input.len() < 2 {
         return RVec::new();
     }
 
-    let tabw = make_new_tab(&state.browser).unwrap();
-    let results = google_search_async(tabw, input, 1, state.config.max_results).await;
-
-    results
-        .iter()
-        .enumerate()
-        .map(|(i, res)| Match {
-            title: format!("{} ({})", res.description.clone(), res.title.clone()).into(),
-            description: ROption::RSome(res.link.clone().into()),
-            icon: ROption::RNone,
-            id: ROption::RSome(i as u64),
-            use_pango: false,
+    let task_id = state
+        .task_queue
+        .add_task(SearchTask {
+            engine: Engines::Google,
+            query: input.clone(),
+            page: 1,
+            max_results: state.config.max_results,
         })
-        .collect()
+        .await;
+
+    let _ = &state.task_queue.wait_result_update().await;
+
+    let last_task_id = state.task_queue.get_last_finished_task_id();
+    if task_id > last_task_id {
+        let _ = &state.task_queue.wait_result_update().await;
+    }
+
+    let last_task_id = state.task_queue.get_last_finished_task_id();
+
+    if task_id == last_task_id {
+        let results = &state.task_queue.get_result();
+
+        let final_results = results
+            .iter()
+            .enumerate()
+            .map(|(i, res)| Match {
+                title: format!("{} ({})", res.description.clone(), res.title.clone()).into(),
+                description: ROption::RSome(res.link.clone().into()),
+                icon: ROption::RNone,
+                id: ROption::RSome(i as u64),
+                use_pango: false,
+            })
+            .collect::<RVec<_>>();
+
+        {
+            let mut curr_result = state.last_stored_result.write().await;
+            *curr_result = final_results.clone();
+        }
+        state.result_notify.notify_waiters();
+
+        return final_results;
+    } else {
+        state.result_notify.notified().await;
+
+        return state.last_stored_result.read().await.clone();
+    }
 }
 
 #[info]

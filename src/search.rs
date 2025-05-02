@@ -8,6 +8,7 @@ use std::ffi::OsStr;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use sysinfo::System;
 use tokio::sync::{Mutex, Notify};
@@ -30,6 +31,12 @@ pub struct SearchTask {
     pub max_results: u32,
 }
 
+#[derive(Debug)]
+pub struct QueuedSearchTask {
+    pub task: SearchTask,
+    pub id: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct SearchResult {
     pub title: String,
@@ -44,11 +51,11 @@ pub struct SearchResult {
 #[derive(Clone)]
 pub struct SearchTaskQueue {
     browser: Browser,
-    queue: Arc<Mutex<VecDeque<SearchTask>>>,
-    notify: Arc<Notify>,
+    queue: Arc<Mutex<VecDeque<QueuedSearchTask>>>,
     result: Arc<RwLock<Vec<SearchResult>>>,
     result_notify: Arc<Notify>,
     is_running: Arc<AtomicBool>,
+    last_finished_task_id: Arc<AtomicU32>,
 }
 
 impl SearchTaskQueue {
@@ -56,17 +63,26 @@ impl SearchTaskQueue {
         Self {
             browser,
             queue: Arc::new(Mutex::new(VecDeque::new())),
-            notify: Arc::new(Notify::new()),
             result: Arc::new(RwLock::new(Vec::new())),
             result_notify: Arc::new(Notify::new()),
             is_running: Arc::new(AtomicBool::new(false)),
+            last_finished_task_id: Arc::new(AtomicU32::new(1000)),
         }
     }
 
-    pub async fn add_task(&self, task: SearchTask) {
-        let mut queue = self.queue.lock().await;
-        queue.push_back(task);
-        self.notify.notify_one(); // Wake up the processor
+    pub async fn add_task(&self, task: SearchTask) -> u32 {
+        let mut id = 0;
+        {
+            let mut queue = self.queue.lock().await;
+            if queue.is_empty() {
+                queue.push_back(QueuedSearchTask { task, id });
+            } else {
+                id = (queue.back().unwrap().id + 1) % 100;
+                queue.push_back(QueuedSearchTask { task, id });
+            }
+        }
+        self.start_processor();
+        id
     }
 
     pub fn get_result(&self) -> Vec<SearchResult> {
@@ -75,6 +91,10 @@ impl SearchTaskQueue {
 
     pub async fn wait_result_update(&self) {
         self.result_notify.notified().await;
+    }
+
+    pub fn get_last_finished_task_id(&self) -> u32 {
+        self.last_finished_task_id.load(Ordering::SeqCst)
     }
 
     pub fn start_processor(&self) {
@@ -92,19 +112,19 @@ impl SearchTaskQueue {
 
     async fn run(self) {
         loop {
-            self.notify.notified().await;
-
             let maybe_task = {
                 let mut queue = self.queue.lock().await;
                 queue.pop_front()
             };
 
-            if let Some(task) = maybe_task {
+            if let Some(qtask) = maybe_task {
+                let __last_task_id = qtask.id;
+
                 let new_result = google_search(
                     make_new_tab(&self.browser).unwrap(),
-                    task.query,
-                    task.page,
-                    task.max_results,
+                    qtask.task.query,
+                    qtask.task.page,
+                    qtask.task.max_results,
                 )
                 .await;
 
@@ -113,14 +133,21 @@ impl SearchTaskQueue {
                     *curr_result = new_result;
                 }
 
+                self.last_finished_task_id
+                    .store(__last_task_id, Ordering::SeqCst);
+
                 self.result_notify.notify_waiters();
 
-                // After processing, keep only the last task if there are any
                 let mut queue = self.queue.lock().await;
                 if queue.len() > 1 {
+                    // After processing, keep only the last task if there are any
                     let last = queue.pop_back().unwrap();
                     queue.clear();
                     queue.push_back(last);
+                } else if queue.is_empty() {
+                    // Exit on empty queue
+                    self.is_running.store(false, Ordering::SeqCst);
+                    return;
                 }
             }
         }
