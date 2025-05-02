@@ -1,7 +1,6 @@
 use std::error::Error;
 
 mod browser_utils;
-mod bypass;
 
 mod search;
 use search::test_search;
