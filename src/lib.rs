@@ -1,7 +1,10 @@
 use abi_stable::std_types::{ROption, RString, RVec};
 use anyrun_plugin::*;
 use serde::Deserialize;
+use std::thread::sleep;
+use std::time::Duration;
 use std::{fs, process::Command, sync::Arc};
+use tokio::sync::Mutex;
 use tokio::sync::{Notify, RwLock};
 
 mod browser_utils;
@@ -15,6 +18,7 @@ struct Config {
     prefix: String,
     port: u16,
     max_results: u32,
+    type_max_delay: u32,
 }
 
 impl Default for Config {
@@ -23,6 +27,7 @@ impl Default for Config {
             prefix: "@".to_string(),
             port: 8928,
             max_results: 3,
+            type_max_delay: 200,
         }
     }
 }
@@ -32,6 +37,7 @@ struct State {
     task_queue: SearchTaskQueue,
     last_stored_result: Arc<RwLock<RVec<Match>>>,
     result_notify: Arc<Notify>,
+    current_query: Arc<Mutex<String>>,
 }
 
 #[init]
@@ -50,6 +56,7 @@ async fn init(config_dir: RString) -> State {
         task_queue,
         last_stored_result: Arc::new(RwLock::new(RVec::new())),
         result_notify: Arc::new(Notify::new()),
+        current_query: Arc::new(Mutex::new("".to_string())),
     }
 }
 
@@ -77,6 +84,23 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
     if input.is_empty() || input.len() < 2 {
         return RVec::new();
     }
+
+    // check if typing
+    *state.current_query.lock().await = input.clone();
+
+    println!(
+        "QUERY:{}, sleeping, will wait for {}ms",
+        input, state.config.type_max_delay
+    );
+
+    sleep(Duration::from_millis(state.config.type_max_delay as u64));
+
+    if *state.current_query.lock().await != input {
+        println!("typing, not searching");
+        return state.last_stored_result.read().await.clone();
+    }
+
+    println!("not typing anymore, ig ill do a search for {}", input);
 
     let task_id = state
         .task_queue
