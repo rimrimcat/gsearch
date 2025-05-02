@@ -93,6 +93,10 @@ impl SearchTaskQueue {
         self.result_notify.notified().await;
     }
 
+    pub fn get_last_finished_task_id(&self) -> u32 {
+        self.last_finished_task_id.load(Ordering::SeqCst)
+    }
+
     pub fn start_processor(&self) {
         if self
             .is_running
