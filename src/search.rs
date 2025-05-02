@@ -7,6 +7,8 @@ use std::error::Error;
 use std::ffi::OsStr;
 use std::sync::Arc;
 use std::sync::RwLock;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use sysinfo::System;
 use tokio::sync::{Mutex, Notify};
 use tokio::{spawn, task::JoinHandle};
@@ -46,6 +48,7 @@ pub struct SearchTaskQueue {
     notify: Arc<Notify>,
     result: Arc<RwLock<Vec<SearchResult>>>,
     result_notify: Arc<Notify>,
+    is_running: Arc<AtomicBool>,
 }
 
 impl SearchTaskQueue {
@@ -56,6 +59,7 @@ impl SearchTaskQueue {
             notify: Arc::new(Notify::new()),
             result: Arc::new(RwLock::new(Vec::new())),
             result_notify: Arc::new(Notify::new()),
+            is_running: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -65,7 +69,7 @@ impl SearchTaskQueue {
         self.notify.notify_one(); // Wake up the processor
     }
 
-    pub async fn get_result(&self) -> Vec<SearchResult> {
+    pub fn get_result(&self) -> Vec<SearchResult> {
         self.result.read().unwrap().clone()
     }
 
@@ -73,7 +77,20 @@ impl SearchTaskQueue {
         self.result_notify.notified().await;
     }
 
-    pub async fn run(self) {
+    pub fn start_processor(&self) {
+        if self
+            .is_running
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            let processor = self.clone();
+            tokio::spawn(async move {
+                processor.run().await;
+            });
+        }
+    }
+
+    async fn run(self) {
         loop {
             self.notify.notified().await;
 
@@ -259,10 +276,7 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let task_queue = SearchTaskQueue::new(browser);
 
-    let processor = task_queue.clone();
-    tokio::spawn(async move {
-        processor.run().await;
-    });
+    task_queue.start_processor();
 
     println!("adding task 1");
     task_queue
@@ -311,7 +325,7 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
         .await;
 
     task_queue.wait_result_update().await;
-    let final_result = task_queue.get_result().await;
+    let final_result = task_queue.get_result();
     print_search_results(&final_result);
 
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
