@@ -29,13 +29,10 @@ impl Drop for TabWrapper {
 }
 
 pub fn select_element_text(element: &scraper::element_ref::ElementRef, selector: &str) -> String {
-    element
-        .select(&Selector::parse(selector).unwrap())
-        .next()
-        .unwrap()
-        .text()
-        .collect::<Vec<_>>()
-        .join("")
+    match element.select(&Selector::parse(selector).unwrap()).next() {
+        Some(sel) => sel.text().collect::<Vec<_>>().join(""),
+        None => "".to_string(),
+    }
 }
 
 pub fn select_element_attr(
@@ -43,14 +40,10 @@ pub fn select_element_attr(
     selector: &str,
     attr: &str,
 ) -> String {
-    element
-        .select(&Selector::parse(selector).unwrap())
-        .next()
-        .unwrap()
-        .value()
-        .attr(attr)
-        .unwrap()
-        .to_string()
+    match element.select(&Selector::parse(selector).unwrap()).next() {
+        Some(sel) => sel.value().attr(attr).unwrap().to_string(),
+        None => "".to_string(),
+    }
 }
 
 pub fn check_chromium() -> bool {
