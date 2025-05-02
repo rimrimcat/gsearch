@@ -92,7 +92,9 @@ impl SearchTaskQueue {
 
     async fn run(self) {
         loop {
-            self.notify.notified().await;
+            if self.queue.lock().await.is_empty() {
+                self.notify.notified().await;
+            }
 
             let maybe_task = {
                 let mut queue = self.queue.lock().await;
