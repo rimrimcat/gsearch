@@ -37,7 +37,7 @@ pub fn is_captcha(fragment: &Html) -> bool {
     false
 }
 
-pub fn google_search(
+async fn __google_search(
     tab: &Arc<Tab>,
     query: &str,
     page: u32,
@@ -59,10 +59,10 @@ pub fn google_search(
 
     tab.navigate_to(&query_link)?.wait_until_navigated()?;
 
-    let html = tab.get_content()?;
-    let fragment = Html::parse_document(&html);
+    let html_str = tab.get_content()?;
+    let html = Html::parse_document(&html_str);
 
-    if is_captcha(&fragment) {
+    if is_captcha(&html) {
         return Ok(vec![SearchResult {
             title: "Captcha".to_string(),
             link: query_link.to_string(),
@@ -74,7 +74,7 @@ pub fn google_search(
         }]);
     }
 
-    let main_div = fragment
+    let main_div = html
         .select(&Selector::parse("div#rso").unwrap())
         .next()
         .unwrap();
@@ -142,7 +142,7 @@ pub async fn google_search_async(
     page: u32,
     max_results: u32,
 ) -> Vec<SearchResult> {
-    let result = google_search(&tabw.tab, &query, page, max_results);
+    let result = __google_search(&tabw.tab, &query, page, max_results).await;
 
     let ret = match result {
         Ok(_) => result,
