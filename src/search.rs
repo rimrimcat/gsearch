@@ -22,6 +22,21 @@ pub struct SearchResult {
     pub page: u32,
 }
 
+pub fn is_captcha(fragment: &Html) -> bool {
+    // div
+    // id="recaptcha"
+    // class="g-recaptcha"
+
+    if fragment
+        .select(&Selector::parse("div#recaptcha").unwrap())
+        .next()
+        .is_some()
+    {
+        return true;
+    }
+    false
+}
+
 pub fn google_search(
     tab: &Arc<Tab>,
     query: &str,
@@ -32,15 +47,32 @@ pub fn google_search(
         true => "".to_string(),
         false => format!("&start={}", ((page - 1) * 10).to_string()),
     };
+    let page_num = match page <= 1 {
+        true => 1,
+        false => page,
+    };
 
-    tab.navigate_to(&format!(
+    let query_link = format!(
         "https://www.google.com/search?udm=14&dpr=1&q={}{}",
         query, start_page
-    ))?
-    .wait_until_navigated()?;
+    );
+
+    tab.navigate_to(&query_link)?.wait_until_navigated()?;
 
     let html = tab.get_content()?;
     let fragment = Html::parse_document(&html);
+
+    if is_captcha(&fragment) {
+        return Ok(vec![SearchResult {
+            title: "Captcha".to_string(),
+            link: query_link.to_string(),
+            cite: tab.get_url(),
+            image: "".to_string(),
+            description: "Cannot access due to captcha".to_string(),
+            updated: "".to_string(),
+            page: page_num,
+        }]);
+    }
 
     let main_div = fragment
         .select(&Selector::parse("div#rso").unwrap())
@@ -95,10 +127,7 @@ pub fn google_search(
             image,
             description,
             updated,
-            page: match page <= 1 {
-                true => 1,
-                false => page,
-            },
+            page: page_num,
         };
 
         search_results.push(result);
