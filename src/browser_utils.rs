@@ -122,3 +122,40 @@ pub fn make_new_tab(browser: &Browser) -> Result<TabWrapper, Box<dyn Error + Sen
 
     Ok(TabWrapper::new(tab))
 }
+
+pub fn make_or_take_nth_tab(
+    browser: &Browser,
+    n: u16,
+) -> Result<TabWrapper, Box<dyn Error + Send + Sync>> {
+    #[cfg(debug_assertions)]
+    println!("Will make or take {}th tab...", n);
+    #[cfg(debug_assertions)]
+    let start = Instant::now();
+
+    let custom_user_agent = get_chrome_rua();
+
+    let mut headers = HashMap::new();
+    headers.insert("User-Agent", custom_user_agent);
+
+    // need to run this to get the tabs
+    let _ = browser.new_tab()?.close_target()?;
+
+    let tab;
+
+    if browser.get_tabs().lock().unwrap().len() > n as usize {
+        tab = browser.get_tabs().lock().unwrap()[n as usize - 1].clone();
+
+        #[cfg(debug_assertions)]
+        println!("Tab taken in {}ms", start.elapsed().as_millis());
+    } else {
+        tab = browser.new_tab()?;
+
+        #[cfg(debug_assertions)]
+        println!("Tab created in {}ms", start.elapsed().as_millis());
+    }
+
+    tab.set_extra_http_headers(headers)?;
+    tab.enable_stealth_mode()?;
+
+    Ok(TabWrapper::new(tab))
+}
