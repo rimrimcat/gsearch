@@ -52,7 +52,7 @@ pub struct SearchResult {
 #[derive(Clone)]
 pub struct SearchTaskQueue {
     browser: Browser,
-    tabw: TabWrapper,
+    tabw: Arc<TabWrapper>,
     queue: Arc<Mutex<VecDeque<QueuedSearchTask>>>,
     result: Arc<RwLock<Vec<SearchResult>>>,
     result_notify: Arc<Notify>,
@@ -69,7 +69,7 @@ impl SearchTaskQueue {
 
         Self {
             browser,
-            tabw: make_new_tab(&_browser).unwrap(),
+            tabw: Arc::new(make_new_tab(&_browser).unwrap()),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             result: Arc::new(RwLock::new(Vec::new())),
             result_notify: Arc::new(Notify::new()),
@@ -89,6 +89,10 @@ impl SearchTaskQueue {
                 queue.push_back(QueuedSearchTask { task, id });
             }
         }
+
+        #[cfg(debug_assertions)]
+        println!("Task added to queue with id");
+
         self.start_processor();
         id
     }
@@ -111,6 +115,9 @@ impl SearchTaskQueue {
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
         {
+            #[cfg(debug_assertions)]
+            println!("Starting processor...");
+
             let processor = self.clone();
             tokio::spawn(async move {
                 processor.run().await;
@@ -118,7 +125,7 @@ impl SearchTaskQueue {
         }
     }
 
-    async fn run(self) {
+    async fn run(&self) {
         loop {
             let maybe_task = {
                 let mut queue = self.queue.lock().await;
@@ -161,7 +168,9 @@ impl SearchTaskQueue {
                     queue.clear();
                     queue.push_back(last);
                 } else if queue.is_empty() {
-                    // Exit on empty queue
+                    #[cfg(debug_assertions)]
+                    println!("Queue empty, processor exiting...");
+
                     self.is_running.store(false, Ordering::SeqCst);
                     return;
                 }
@@ -333,9 +342,6 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let task_queue = SearchTaskQueue::new(browser);
 
-    task_queue.start_processor();
-
-    println!("adding task 1");
     task_queue
         .add_task(SearchTask {
             engine: Engines::Google,
@@ -347,7 +353,6 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
 
-    println!("adding task 2");
     task_queue
         .add_task(SearchTask {
             engine: Engines::Google,
@@ -359,7 +364,6 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
 
-    println!("adding task 3");
     task_queue
         .add_task(SearchTask {
             engine: Engines::Google,
@@ -371,7 +375,6 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
 
-    println!("adding task 4");
     task_queue
         .add_task(SearchTask {
             engine: Engines::Google,
@@ -386,7 +389,23 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
     let final_result = task_queue.get_result();
     println!("Final result description: {}", final_result[0].description);
 
-    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(10000)).await;
+
+    task_queue
+        .add_task(SearchTask {
+            engine: Engines::Google,
+            query: "sveltekit".into(),
+            page: 1,
+            max_results: 10,
+        })
+        .await;
+
+    task_queue.wait_result_update().await;
+
+    let final_result = task_queue.get_result();
+    println!("Task 5 result description: {}", final_result[0].description);
+
+    tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
     task_queue.stop().await;
 
     Ok(())
