@@ -8,6 +8,7 @@ use std::ffi::OsStr;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use sysinfo::System;
 use tokio::sync::{Mutex, Notify};
@@ -54,6 +55,7 @@ pub struct SearchTaskQueue {
     result: Arc<RwLock<Vec<SearchResult>>>,
     result_notify: Arc<Notify>,
     is_running: Arc<AtomicBool>,
+    last_finished_task_id: Arc<AtomicU32>,
 }
 
 impl SearchTaskQueue {
@@ -64,6 +66,7 @@ impl SearchTaskQueue {
             result: Arc::new(RwLock::new(Vec::new())),
             result_notify: Arc::new(Notify::new()),
             is_running: Arc::new(AtomicBool::new(false)),
+            last_finished_task_id: Arc::new(AtomicU32::new(1000)),
         }
     }
 
@@ -80,15 +83,6 @@ impl SearchTaskQueue {
         }
         self.start_processor();
         id
-    }
-
-    pub async fn get_next_task_id(&self) -> u32 {
-        let mut queue = self.queue.lock().await;
-        if queue.is_empty() {
-            1000
-        } else {
-            queue.back().unwrap().id
-        }
     }
 
     pub fn get_result(&self) -> Vec<SearchResult> {
@@ -120,6 +114,8 @@ impl SearchTaskQueue {
             };
 
             if let Some(qtask) = maybe_task {
+                let __last_task_id = qtask.id;
+
                 let new_result = google_search(
                     make_new_tab(&self.browser).unwrap(),
                     qtask.task.query,
@@ -132,6 +128,9 @@ impl SearchTaskQueue {
                     let mut curr_result = self.result.write().unwrap();
                     *curr_result = new_result;
                 }
+
+                self.last_finished_task_id
+                    .store(__last_task_id, Ordering::SeqCst);
 
                 self.result_notify.notify_waiters();
 
