@@ -2,7 +2,7 @@ use fake_user_agent::get_chrome_rua;
 use headless_chrome::{Browser, LaunchOptionsBuilder, Tab};
 use scraper::Selector;
 use serde::Deserialize;
-use std::{collections::HashMap, error::Error, ffi::OsStr, sync::Arc};
+use std::{collections::HashMap, error::Error, ffi::OsStr, sync::Arc, time::Instant};
 use tokio::spawn;
 
 #[derive(Debug, Deserialize)]
@@ -11,6 +11,7 @@ pub struct DevToolsInfo {
     pub websocket_debugger_url: String,
 }
 
+#[derive(Clone)]
 pub struct TabWrapper {
     pub tab: Arc<Tab>,
 }
@@ -102,6 +103,11 @@ pub async fn connect_to_browser(port: u16) -> Result<Browser, Box<dyn Error + Se
 }
 
 pub fn make_new_tab(browser: &Browser) -> Result<TabWrapper, Box<dyn Error + Send + Sync>> {
+    #[cfg(debug_assertions)]
+    println!("Creating new tab...");
+    #[cfg(debug_assertions)]
+    let start = Instant::now();
+
     let custom_user_agent = get_chrome_rua();
 
     let mut headers = HashMap::new();
@@ -110,6 +116,9 @@ pub fn make_new_tab(browser: &Browser) -> Result<TabWrapper, Box<dyn Error + Sen
     let tab = browser.new_tab()?;
     tab.set_extra_http_headers(headers)?;
     tab.enable_stealth_mode()?;
+
+    #[cfg(debug_assertions)]
+    println!("Tab created in {}ms", start.elapsed().as_millis());
 
     Ok(TabWrapper::new(tab))
 }
