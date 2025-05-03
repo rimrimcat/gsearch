@@ -62,9 +62,6 @@ pub struct SearchTaskQueue {
 
 impl SearchTaskQueue {
     pub fn new(tab: Arc<Tab>) -> Self {
-        #[cfg(debug_assertions)]
-        println!("Browser and tab created.");
-
         Self {
             tab,
             queue: Arc::new(Mutex::new(VecDeque::new())),
@@ -89,7 +86,7 @@ impl SearchTaskQueue {
         }
 
         #[cfg(debug_assertions)]
-        println!("Task added to queue with id");
+        println!("Task added to queue");
 
         self.start_processor();
         id
