@@ -31,7 +31,7 @@ impl Default for Config {
             prefix: "@".to_string(),
             port: 8928,
             max_results: 3,
-            type_max_delay: 1000,
+            type_max_delay: 400,
         }
     }
 }
@@ -85,6 +85,10 @@ async fn init(config_dir: RString) -> State {
 
 #[handler]
 fn handler(selection: Match, _state: &State) -> HandleResult {
+    if selection.description == ROption::RNone {
+        return HandleResult::Close;
+    }
+
     if let Err(why) = Command::new("sh")
         .arg("-c")
         .arg(format!("xdg-open \"{}\"", selection.description.unwrap()))
@@ -105,25 +109,24 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
 
     let input = input.replace(&state.config.prefix, "");
     if input.is_empty() || input.len() < 2 {
-        return RVec::new();
+        return _typing();
     }
 
     // check if typing
     *state.current_query.lock().await = input.clone();
 
+    println!("will sleep for {}ms", state.config.type_max_delay);
     sleep(Duration::from_millis(state.config.type_max_delay as u64));
 
     if *state.current_query.lock().await != input {
         println!("Still typing, will resturn last stored result");
-        // if state.has_result.load(SeqCst) {
-        //     println!("Returning last stored result");
-        //     return state.last_stored_result.read().await.clone();
-        // } else {
-        //     println!("Returning typing...");
-        //     return _typing();
-        // }
+        if state.has_result.load(SeqCst) {
+            return state.last_stored_result.read().await.clone();
+        } else {
+            return _typing();
+        }
 
-        return state.last_stored_result.read().await.clone();
+        // return state.last_stored_result.read().await.clone();
     }
 
     println!("will start task");
@@ -159,11 +162,16 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
             .iter()
             .enumerate()
             .map(|(i, res)| Match {
-                title: format!("{} ({})", res.description.clone(), res.title.clone()).into(),
+                title: format!(
+                    "{}\n<span weight=\"bold\">{}</span>",
+                    res.description.clone(),
+                    res.title.clone()
+                )
+                .into(),
                 description: ROption::RSome(res.link.clone().into()),
                 icon: ROption::RNone,
                 id: ROption::RSome(i as u64),
-                use_pango: false,
+                use_pango: true,
             })
             .collect::<RVec<_>>();
 
@@ -191,6 +199,7 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
 
         state.result_notify.notify_waiters();
 
+        println!("notified and will return final results");
         return final_results;
     } else {
         println!("waiting for result");
