@@ -311,6 +311,97 @@ async fn __google_search(
     Ok(search_results)
 }
 
+fn google_stealth_extract_url(input: String) -> Option<String> {
+    let q_start = input.find("q=")?;
+    let start_index = q_start + 2;
+
+    let remaining = &input[start_index..];
+    let end_index = remaining.find('&')?;
+
+    Some(remaining[..end_index].to_string())
+}
+
+async fn __google_search_stealth(
+    page: &Page,
+    query: &str,
+    page_num: u32,
+    max_results: u32, // must be within 1 and 10
+) -> Result<Vec<SearchResult>, Box<dyn Error + Send + Sync>> {
+    let start_page = match page_num <= 1 {
+        true => "".to_string(),
+        false => format!("&start={}", ((page_num - 1) * 10).to_string()),
+    };
+    let page_num = match page_num <= 1 {
+        true => 1,
+        false => page_num,
+    };
+
+    let query_link = format!(
+        "https://www.google.com/search?udm=14&dpr=1&q={}{}",
+        query, start_page
+    );
+
+    page.goto(&query_link).await?;
+
+    let html_str = page.wait_for_navigation().await?.content().await?;
+
+    let html = Html::parse_document(&html_str);
+
+    if is_captcha(&html) {
+        #[cfg(debug_assertions)]
+        println!("Captcha detected!");
+
+        // let cite = match page.url().await {
+        //     Ok(url) => url.unwrap(),
+        //     Err(_) => "".to_string(),
+        // };
+
+        return Ok(vec![SearchResult {
+            title: "Captcha".into(),
+            link: query_link.into(),
+            cite: "".into(),
+            image: "".into(),
+            description: "Cannot access due to captcha".into(),
+            updated: "".into(),
+            page: page_num,
+        }]);
+    }
+
+    let main_body = html
+        .select(&Selector::parse("body").unwrap())
+        .next()
+        .unwrap();
+
+    let div_selector = Selector::parse("div.ezO2md").unwrap();
+
+    let mut search_results = Vec::new();
+
+    for element in main_body.select(&div_selector).take(max_results as usize) {
+        let title = select_element_text(&element, "span.CVA68e");
+        let link =
+            match google_stealth_extract_url(select_element_attr(&element, "a.fuLhoc", "href")) {
+                Some(_url) => _url,
+                None => "".to_string(),
+            };
+        let cite = select_element_text(&element, "span.qXLe6d.dXDvrc > span.fYyStc");
+        let description = select_element_text(&element, "span.qXLe6d.FrIlee > span.fYyStc");
+
+        let result = SearchResult {
+            title,
+            link,
+            cite,
+            image: "".into(),
+            description,
+            updated: "".into(),
+            page: page_num,
+        };
+
+        search_results.push(result);
+    }
+
+    Ok(search_results)
+}
+
 pub async fn google_search(
     page: &Page,
     query: String,
@@ -318,6 +409,22 @@ pub async fn google_search(
     max_results: u32,
 ) -> Vec<SearchResult> {
     let result = __google_search(&page, &query, page_num, max_results).await;
+
+    let ret = match result {
+        Ok(_) => result,
+        Err(_) => Ok(Vec::new()),
+    };
+
+    ret.unwrap()
+}
+
+pub async fn google_search_stealth(
+    page: &Page,
+    query: String,
+    page_num: u32,
+    max_results: u32,
+) -> Vec<SearchResult> {
+    let result = __google_search_stealth(&page, &query, page_num, max_results).await;
 
     let ret = match result {
         Ok(_) => result,
