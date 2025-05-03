@@ -136,7 +136,7 @@ impl SearchTaskQueue {
 
                 let __last_task_id = qtask.id;
 
-                let new_result = google_search(
+                let new_result = google_search_stealth(
                     &self.page,
                     qtask.task.query,
                     qtask.task.page,
