@@ -4,9 +4,9 @@
     version = "0.1.0"
 
 [dependencies]
+    chromiumoxide = "0.7.0"
     fake_user_agent = "0.2.1"
     futures = "0.3.31"
-    headless_chrome = "1.0.17"
     reqwest = { version = "0.12.15", features = [
         "blocking",
         "json",
