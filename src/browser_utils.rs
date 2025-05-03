@@ -106,11 +106,6 @@ pub async fn connect_to_browser(port: u16) -> Result<BrowserWrapper, Box<dyn Err
     #[cfg(debug_assertions)]
     let start = Instant::now();
 
-    // let res: DevToolsInfo = reqwest::get(format!("http://localhost:{}/json/version", port))
-    //     .await?
-    //     .json()
-    //     .await?;
-
     let tuple = Browser::connect(format!("http://localhost:{}", port)).await?;
 
     let bwrapper = BrowserWrapper::new(Arc::new(tuple.0), tuple.1).await;
