@@ -26,9 +26,15 @@ pub struct DevToolsInfo {
 pub struct PageWrapper {
     pub page: Page,
 }
-impl Drop for PageWrapper {
-    fn drop(&mut self) {
-        println!("Dropping page...");
+
+impl PageWrapper {
+    pub fn new(page: Page) -> Self {
+        Self { page }
+    }
+
+    pub async fn close(self) -> Result<()> {
+        self.page.close().await?;
+        Ok(())
     }
 }
 
@@ -60,12 +66,6 @@ static SCRIPTS: &[&str] = &[
     "src/evasions/window_outerdimensions.js",
     "src/evasions/hairline_fix.js",
 ];
-
-impl PageWrapper {
-    pub fn new(page: Page) -> Self {
-        Self { page }
-    }
-}
 
 pub fn select_element_text(element: &scraper::element_ref::ElementRef, selector: &str) -> String {
     match element.select(&Selector::parse(selector).unwrap()).next() {
