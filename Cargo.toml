@@ -4,7 +4,9 @@
     version = "0.1.0"
 
 [dependencies]
-    chromiumoxide = "0.7.0"
+    chromiumoxide = { version = "0.7.0", features = [
+        "tokio-runtime",
+    ] }
     fake_user_agent = "0.2.1"
     futures = "0.3.31"
     reqwest = { version = "0.12.15", features = [
