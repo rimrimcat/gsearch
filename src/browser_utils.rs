@@ -14,6 +14,7 @@ use futures::StreamExt;
 use scraper::Selector;
 use serde::Deserialize;
 use std::{error::Error, ffi::OsStr, fs::read_to_string, sync::Arc, time::Instant};
+use tokio::spawn;
 
 #[derive(Debug, Deserialize)]
 pub struct DevToolsInfo {
@@ -26,9 +27,8 @@ pub struct PageWrapper {
     pub page: Page,
 }
 impl Drop for PageWrapper {
-    #[tokio::main]
-    async fn drop(&mut self) {
-        let _ = self.page.execute(CloseParams::default()).await;
+    fn drop(&mut self) {
+        println!("Dropping page...");
     }
 }
 
@@ -156,25 +156,7 @@ pub async fn make_new_tab(browser: &Browser) -> Result<PageWrapper, Box<dyn Erro
     #[cfg(debug_assertions)]
     let start = Instant::now();
 
-    println!("Creating blank page...");
-    println!("browser address: {}", browser.websocket_address());
-
-    browser
-        .new_page(CreateTargetParams {
-            url: "about:blank".into(),
-            width: None,
-            height: None,
-            browser_context_id: None,
-            enable_begin_frame_control: None,
-            new_window: None,
-            background: None,
-            for_tab: None,
-        })
-        .await?;
-    #[cfg(debug_assertions)]
-    println!("{}ms: Page created", start.elapsed().as_millis());
-
-    let page = browser.new_page("https://en.wikipedia.org").await?;
+    let page = browser.new_page("chrome://version/").await?;
     #[cfg(debug_assertions)]
     println!("{}ms: Page created", start.elapsed().as_millis());
 
@@ -210,7 +192,7 @@ pub async fn make_or_take_nth_tab(
             n
         );
     } else {
-        tab = browser.new_page("").await?;
+        tab = browser.new_page("chrome://version/").await?;
         inject_stealth(&tab).await?;
 
         #[cfg(debug_assertions)]
