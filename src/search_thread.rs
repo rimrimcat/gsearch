@@ -63,6 +63,7 @@ impl BrowserThread {
 
         loop {
             if state.last_activity.elapsed() > TIMEOUT_DURATION {
+                #[cfg(debug_assertions)]
                 println!("Browser thread shutting down due to inactivity");
                 break;
             }
@@ -81,12 +82,14 @@ impl BrowserThread {
                         }
                         BrowserCommand::KeepAlive => {}
                         BrowserCommand::Shutdown => {
+                            #[cfg(debug_assertions)]
                             println!("Browser thread received shutdown command");
                             break;
                         }
                     }
                 }
                 Ok(None) => {
+                    #[cfg(debug_assertions)]
                     println!("Browser thread channel closed");
                     break;
                 }
@@ -94,8 +97,9 @@ impl BrowserThread {
             }
         }
 
-        println!("Browser thread terminated");
         state.task_queue.stop().await;
+        #[cfg(debug_assertions)]
+        println!("Browser thread terminated");
     }
 
     pub async fn perform_search(state: &mut BrowserState, query: String) -> Vec<SearchResult> {
@@ -144,7 +148,6 @@ impl BrowserThread {
             .await
             .map_err(|_| Error::ChannelClosed)?;
 
-        // Wait for the thread to complete
         match self.handle.await {
             Ok(_) => Ok(()),
             Err(e) => Err(Error::JoinError(format!("{}", e))),
