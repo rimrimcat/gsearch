@@ -4,6 +4,9 @@
     version = "0.1.0"
 
 [dependencies]
+    bincode = { version = "2.0.1", features = [
+        "serde",
+    ] }
     chromiumoxide = { version = "0.7.0", features = [
         "tokio-runtime",
     ] }
