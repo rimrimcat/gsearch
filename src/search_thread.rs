@@ -26,6 +26,7 @@ pub enum BrowserCommand {
     AddTask(SearchTask, oneshot::Sender<u32>),
     WaitResultUpdate(oneshot::Sender<()>),
     GetResult(oneshot::Sender<Vec<SearchResult>>),
+    GetLastFinishedTaskId(oneshot::Sender<u32>),
     KeepAlive,
     Shutdown,
 }
@@ -93,6 +94,10 @@ impl BrowserThread {
                         BrowserCommand::GetResult(response_tx) => {
                             let results = state.task_queue.get_result();
                             let _ = response_tx.send(results);
+                        }
+                        BrowserCommand::GetLastFinishedTaskId(response_tx) => {
+                            let task_id = state.task_queue.get_last_finished_task_id();
+                            let _ = response_tx.send(task_id);
                         }
                         BrowserCommand::KeepAlive => {}
                         BrowserCommand::Shutdown => {
@@ -171,6 +176,15 @@ impl BrowserThread {
         let (tx, rx) = oneshot::channel();
         self.command_tx
             .send(BrowserCommand::GetResult(tx))
+            .await
+            .map_err(|_| Error::ChannelClosed)?;
+        rx.await.map_err(|_| Error::ResponseChannelClosed)
+    }
+
+    pub async fn get_last_finished_task_id(&self) -> Result<u32, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(BrowserCommand::GetLastFinishedTaskId(tx))
             .await
             .map_err(|_| Error::ChannelClosed)?;
         rx.await.map_err(|_| Error::ResponseChannelClosed)
