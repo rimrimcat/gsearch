@@ -295,4 +295,54 @@ impl BrowserClient {
         let resp = self.send_request(BrowserRequest::Test).await?;
         Ok(resp)
     }
+
+    pub async fn add_task(&self, task: SearchTask) -> Result<u32, Box<dyn std::error::Error>> {
+        let resp = self.send_request(BrowserRequest::AddTask(task)).await?;
+        match resp {
+            BrowserResponse::TaskId(id) => Ok(id),
+            _ => Err("Invalid response".into()),
+        }
+    }
+
+    pub async fn wait_result_update(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let resp = self.send_request(BrowserRequest::WaitResultUpdate).await?;
+        match resp {
+            BrowserResponse::ResultUpdateComplete => Ok(()),
+            _ => Err("Invalid response".into()),
+        }
+    }
+
+    pub async fn get_result(&self) -> Result<Vec<SearchResult>, Box<dyn std::error::Error>> {
+        let resp = self.send_request(BrowserRequest::GetResult).await?;
+        match resp {
+            BrowserResponse::SearchResults(result) => Ok(result),
+            _ => Err("Invalid response".into()),
+        }
+    }
+
+    pub async fn get_last_finished_task_id(&self) -> Result<u32, Box<dyn std::error::Error>> {
+        let resp = self
+            .send_request(BrowserRequest::GetLastFinishedTaskId)
+            .await?;
+        match resp {
+            BrowserResponse::LastFinishedTaskId(id) => Ok(id),
+            _ => Err("Invalid response".into()),
+        }
+    }
+
+    pub async fn keep_alive(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let resp = self.send_request(BrowserRequest::KeepAlive).await?;
+        match resp {
+            BrowserResponse::KeepAlive => Ok(()),
+            _ => Err("Invalid response".into()),
+        }
+    }
+
+    pub async fn shutdown(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let resp = self.send_request(BrowserRequest::Shutdown).await?;
+        match resp {
+            BrowserResponse::Shutdown => Ok(()),
+            _ => Err("Invalid response".into()),
+        }
+    }
 }
