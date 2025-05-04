@@ -177,8 +177,6 @@ impl SearchTaskQueue {
 
             if let Some(qtask) = maybe_task {
                 #[cfg(debug_assertions)]
-                println!("Starting search: {}", qtask.task.query);
-                #[cfg(debug_assertions)]
                 let start = Instant::now();
 
                 let __last_task_id = qtask.id;
@@ -263,6 +261,11 @@ async fn search_google(
     query: String,
     args: SearchArguments,
 ) -> Result<Vec<SearchResult>, Box<dyn Error + Send + Sync>> {
+    #[cfg(debug_assertions)]
+    println!("Starting google search for {}", query);
+    #[cfg(debug_assertions)]
+    let start = Instant::now();
+
     let page_num = args.page;
     let max_results = args.max_results;
 
@@ -281,10 +284,14 @@ async fn search_google(
     );
 
     page.goto(&query_link).await?;
+    #[cfg(debug_assertions)]
+    println!("{}ms: Page loaded", start.elapsed().as_millis());
 
     let html_str = page.wait_for_navigation().await?.content().await?;
 
     let html = Html::parse_document(&html_str);
+    #[cfg(debug_assertions)]
+    println!("{}ms: HTML parsed", start.elapsed().as_millis());
 
     if is_captcha(&html) {
         #[cfg(debug_assertions)]
@@ -316,6 +323,13 @@ async fn search_google(
     let mut search_results = Vec::new();
 
     for element in main_div.select(&div_selector).take(max_results as usize) {
+        #[cfg(debug_assertions)]
+        println!(
+            "{}ms: Extracting result {}",
+            start.elapsed().as_millis(),
+            search_results.len()
+        );
+
         let title = select_element_text(&element, "h3");
         let link = select_element_attr(&element, "a", "href");
         let cite = select_element_text(&element, "cite");
@@ -365,6 +379,9 @@ async fn search_google(
         search_results.push(result);
     }
 
+    #[cfg(debug_assertions)]
+    println!("{}ms: Search finished", start.elapsed().as_millis());
+
     Ok(search_results)
 }
 
@@ -373,8 +390,13 @@ async fn search_google_alt(
     query: String,
     args: SearchArguments,
 ) -> Result<Vec<SearchResult>, Box<dyn Error + Send + Sync>> {
+    #[cfg(debug_assertions)]
+    println!("Starting google alt search for {}", query);
+    #[cfg(debug_assertions)]
+    let start = Instant::now();
+
     // IDK WHY, BUT RUNNING THIS MAKES YOU ACCESS AN ALTERNATIVE GOOGLE SITE?
-    page.set_user_agent(get_chrome_rua()).await?;
+    page.set_user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/535.1 (KHTML, like Gecko) Chrome/13.0.782.41 Safari/535.1").await?;
 
     let page_num = args.page;
     let max_results = args.max_results;
@@ -389,15 +411,19 @@ async fn search_google_alt(
     };
 
     let query_link = format!(
-        "https://www.google.com/search?dpr=1&q={}{}",
+        "https://www.google.com/search?dpr=1&udm=14&q={}{}",
         query, start_page
     );
 
     page.goto(&query_link).await?;
+    #[cfg(debug_assertions)]
+    println!("{}ms: Page loaded", start.elapsed().as_millis());
 
     let html_str = page.wait_for_navigation().await?.content().await?;
 
     let html = Html::parse_document(&html_str);
+    #[cfg(debug_assertions)]
+    println!("{}ms: HTML parsed", start.elapsed().as_millis());
 
     if is_captcha(&html) {
         #[cfg(debug_assertions)]
@@ -429,6 +455,13 @@ async fn search_google_alt(
     let mut search_results = Vec::new();
 
     for element in main_body.select(&div_selector).take(max_results as usize) {
+        #[cfg(debug_assertions)]
+        println!(
+            "{}ms: Extracting result {}",
+            start.elapsed().as_millis(),
+            search_results.len()
+        );
+
         let title = select_element_text(&element, "span.CVA68e");
         let link = match google_alt_extract_url(select_element_attr(&element, "a.fuLhoc", "href")) {
             Some(_url) => _url,
@@ -449,6 +482,9 @@ async fn search_google_alt(
 
         search_results.push(result);
     }
+
+    #[cfg(debug_assertions)]
+    println!("{}ms: Search finished", start.elapsed().as_millis());
 
     Ok(search_results)
 }
