@@ -9,7 +9,9 @@ use std::{fs, process::Command, sync::Arc};
 use tokio::sync::{Mutex, Notify, RwLock};
 
 mod browser_utils;
-use browser_utils::{BrowserWrapper, PageWrapper, connect_to_browser, make_or_take_nth_tab};
+use browser_utils::{
+    BrowserWrapper, PageWrapper, connect_to_browser, make_new_tab, make_or_take_nth_tab,
+};
 
 mod search;
 use search::{Engines, SearchArguments, SearchTask, SearchTaskQueue};
@@ -79,9 +81,8 @@ async fn init(config_dir: RString) -> State {
 
     let port = config.port;
     let browser_wrapper = connect_to_browser(port).await.unwrap();
-    let page_wrapper = make_or_take_nth_tab(
+    let page_wrapper = make_new_tab(
         &browser_wrapper.browser.clone(),
-        2,
         if use_stealth {
             config.evasion_scripts_path.clone()
         } else {
@@ -163,10 +164,7 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
     let task_id = state
         .task_queue
         .add_task(SearchTask {
-            engine: match state.use_stealth {
-                true => Engines::GoogleStealth,
-                false => Engines::Google,
-            },
+            engine: Engines::GoogleAlt,
             query: input.clone(),
             args: Some(SearchArguments::new(1, state.config.max_results)),
         })
