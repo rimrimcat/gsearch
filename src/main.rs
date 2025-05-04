@@ -8,7 +8,9 @@ use chromiumoxide::BrowserConfig;
 use futures::StreamExt;
 use search::Engines;
 use search::SearchTask;
-use search::SearchTaskQueue;
+
+mod search_queue;
+use search_queue::SearchTaskQueue;
 
 mod search;
 
