@@ -135,10 +135,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 test_search_queue().await?;
             }
             "server" => {
-                let _ = BrowserServer::new(8928, None, "/tmp/browser_socket".into())
-                    .await
-                    .start()
-                    .await;
+                let _ = BrowserServer::new(
+                    8928,
+                    Some("src/evasions".into()),
+                    "/tmp/browser_socket".into(),
+                )
+                .await
+                .start()
+                .await;
             }
             "client" => {
                 let client = BrowserClient::new("/tmp/browser_socket".into());
