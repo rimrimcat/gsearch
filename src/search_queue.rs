@@ -1,7 +1,12 @@
+use bincode::{Decode, Encode};
 use chromiumoxide::Page;
+use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::UnixStream;
 use tokio::sync::{Mutex, Notify};
 
 use std::collections::VecDeque;
+use std::fs;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
@@ -9,8 +14,15 @@ use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
+use crate::browser_utils::BrowserWrapper;
+use crate::browser_utils::PageWrapper;
+use crate::browser_utils::connect_to_browser;
+use crate::browser_utils::make_new_tab;
 use crate::search::SearchResult;
 use crate::search::SearchTask;
+
+use bincode::config::standard;
+use bincode::serde::{decode_from_slice, encode_into_slice};
 
 #[derive(Debug)]
 pub struct QueuedSearchTask {
@@ -151,5 +163,136 @@ impl SearchTaskQueue {
             self.result_notify.notified().await;
         }
         let _ = self.page.close().await;
+    }
+}
+
+#[derive(Serialize, Deserialize, Encode, Decode, Debug)]
+pub enum BrowserRequest {
+    AddTask(SearchTask),
+    WaitResultUpdate,
+    GetResult,
+    GetLastFinishedTaskId,
+    KeepAlive,
+    Shutdown,
+    Test,
+}
+
+#[derive(Serialize, Deserialize, Encode, Decode, Debug)]
+pub enum BrowserResponse {
+    TaskId(u32),
+    ResultUpdateComplete,
+    SearchResults(Vec<SearchResult>),
+    LastFinishedTaskId(u32),
+    KeepAlive,
+    Shutdown,
+    Error(String),
+    Test,
+}
+
+pub struct BrowserServer {
+    pub browser_wrapper: BrowserWrapper,
+    pub page_wrapper: PageWrapper,
+    pub queue: SearchTaskQueue,
+    pub last_activity: Instant,
+    pub socket_path: std::path::PathBuf,
+}
+
+impl BrowserServer {
+    pub async fn new(
+        port: u16,
+        evasion_scripts_path: Option<std::path::PathBuf>,
+        socket_path: std::path::PathBuf,
+    ) -> Self {
+        let browser_wrapper = connect_to_browser(port).await.unwrap();
+        let page_wrapper = make_new_tab(&browser_wrapper.browser, evasion_scripts_path.clone())
+            .await
+            .unwrap();
+        let queue = SearchTaskQueue::new(page_wrapper.page.clone());
+
+        Self {
+            browser_wrapper,
+            page_wrapper,
+            queue,
+            last_activity: Instant::now(),
+            socket_path,
+        }
+    }
+
+    async fn handle_request(&self, mut stream: UnixStream) {
+        let mut buffer = [0u8; 1024];
+
+        let _ = stream.read(&mut buffer).await.unwrap();
+        let (req, _): (BrowserRequest, usize) = decode_from_slice(&buffer, standard()).unwrap();
+
+        println!("Server received: {:?}", req);
+
+        let resp = match req {
+            BrowserRequest::AddTask(task) => {
+                BrowserResponse::TaskId(self.queue.add_task(task).await)
+            }
+            BrowserRequest::WaitResultUpdate => BrowserResponse::ResultUpdateComplete,
+            BrowserRequest::GetResult => BrowserResponse::SearchResults(self.queue.get_result()),
+            BrowserRequest::GetLastFinishedTaskId => {
+                BrowserResponse::LastFinishedTaskId(self.queue.get_last_finished_task_id())
+            }
+            BrowserRequest::KeepAlive => BrowserResponse::KeepAlive,
+            BrowserRequest::Shutdown => BrowserResponse::Shutdown,
+            BrowserRequest::Test => BrowserResponse::Test,
+        };
+
+        encode_into_slice(resp, &mut buffer, standard()).unwrap();
+
+        stream.write_all(&buffer).await.unwrap();
+    }
+
+    pub async fn start(self) {
+        let _ = fs::remove_file(&self.socket_path).unwrap();
+
+        let listener = tokio::net::UnixListener::bind(&self.socket_path).unwrap();
+        loop {
+            match listener.accept().await {
+                Ok((stream, _addr)) => {
+                    self.handle_request(stream).await;
+                }
+                Err(e) => {
+                    eprintln!("Failed to accept connection: {}", e);
+                }
+            }
+        }
+    }
+}
+
+pub struct BrowserClient {
+    pub socket_path: std::path::PathBuf,
+}
+
+impl BrowserClient {
+    pub fn new(socket_path: std::path::PathBuf) -> Self {
+        Self { socket_path }
+    }
+
+    pub async fn send_request(
+        &self,
+        req: BrowserRequest,
+    ) -> Result<BrowserResponse, Box<dyn std::error::Error>> {
+        let mut stream = UnixStream::connect(&self.socket_path).await?;
+        let mut buffer = [0u8; 1024];
+
+        encode_into_slice(req, &mut buffer, standard()).unwrap();
+
+        stream.write_all(&buffer).await?;
+        stream.readable().await?;
+        stream.read(&mut buffer).await?;
+
+        let (resp, _): (BrowserResponse, usize) = decode_from_slice(&buffer, standard()).unwrap();
+
+        println!("Client received: {:?}", resp);
+
+        Ok(resp)
+    }
+
+    pub async fn send_test(&self) -> Result<BrowserResponse, Box<dyn std::error::Error>> {
+        let resp = self.send_request(BrowserRequest::Test).await?;
+        Ok(resp)
     }
 }

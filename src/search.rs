@@ -1,5 +1,7 @@
+use bincode::{Decode, Encode};
 use chromiumoxide::{error::Result, page::Page};
 use scraper::{Html, Selector};
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::ffi::OsStr;
 use std::time::Instant;
@@ -7,7 +9,7 @@ use sysinfo::System;
 
 use crate::browser_utils::{select_element_attr, select_element_text};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Serialize, Deserialize, Decode, Encode, Clone)]
 pub enum Engines {
     Google,
     GoogleAlt,
@@ -39,14 +41,14 @@ impl Engines {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize, Decode, Encode, Clone)]
 pub struct SearchTask {
     pub engine: Engines,
     pub query: String,
     pub args: Option<SearchArguments>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize, Decode, Encode, Clone)]
 pub struct SearchArguments {
     pub page: u32,
     pub max_results: u32,
@@ -68,7 +70,7 @@ impl Default for SearchArguments {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Serialize, Deserialize, Decode, Encode, Clone)]
 pub struct SearchResult {
     pub title: String,
     pub link: String,

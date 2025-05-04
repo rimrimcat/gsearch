@@ -11,6 +11,9 @@
 [dependencies]
     abi_stable = "0.11.1"
     anyrun-plugin = { path = "../../anyrun-plugin" }
+    bincode = { version = "2.0.1", features = [
+        "serde",
+    ] }
     chromiumoxide = { version = "0.7.0", features = [
         "tokio-runtime",
     ] }
