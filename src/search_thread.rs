@@ -22,8 +22,10 @@ pub struct BrowserState {
     last_activity: Instant,
 }
 pub enum BrowserCommand {
-    Search(String, oneshot::Sender<Vec<SearchResult>>),
-    GetPage(oneshot::Sender<PageWrapper>),
+    Search(String, oneshot::Sender<Vec<SearchResult>>), // bypasses queue
+    AddTask(SearchTask, oneshot::Sender<u32>),
+    WaitResultUpdate(oneshot::Sender<()>),
+    GetResult(oneshot::Sender<Vec<SearchResult>>),
     KeepAlive,
     Shutdown,
 }
@@ -75,10 +77,22 @@ impl BrowserThread {
                     match command {
                         BrowserCommand::Search(query, response_tx) => {
                             let results = Self::perform_search(&mut state, query).await;
-                            let _ = response_tx.send(results); // Ignore send errors
+                            let _ = response_tx.send(results);
                         }
-                        BrowserCommand::GetPage(response_tx) => {
-                            let _ = response_tx.send(state.page_wrapper.clone());
+                        BrowserCommand::AddTask(task, response_tx) => {
+                            let task_id = state.task_queue.add_task(task).await;
+                            let _ = response_tx.send(task_id);
+                        }
+                        BrowserCommand::WaitResultUpdate(response_tx) => {
+                            let tq = state.task_queue.clone();
+                            tokio::spawn(async move {
+                                tq.wait_result_update().await;
+                                let _ = response_tx.send(());
+                            });
+                        }
+                        BrowserCommand::GetResult(response_tx) => {
+                            let results = state.task_queue.get_result();
+                            let _ = response_tx.send(results);
                         }
                         BrowserCommand::KeepAlive => {}
                         BrowserCommand::Shutdown => {
@@ -130,6 +144,33 @@ impl BrowserThread {
         let (tx, rx) = oneshot::channel();
         self.command_tx
             .send(BrowserCommand::Search(query, tx))
+            .await
+            .map_err(|_| Error::ChannelClosed)?;
+        rx.await.map_err(|_| Error::ResponseChannelClosed)
+    }
+
+    pub async fn add_task(&self, task: SearchTask) -> Result<u32, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(BrowserCommand::AddTask(task, tx))
+            .await
+            .map_err(|_| Error::ChannelClosed)?;
+        rx.await.map_err(|_| Error::ResponseChannelClosed)
+    }
+
+    pub async fn wait_result_update(&self) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(BrowserCommand::WaitResultUpdate(tx))
+            .await
+            .map_err(|_| Error::ChannelClosed)?;
+        rx.await.map_err(|_| Error::ResponseChannelClosed)
+    }
+
+    pub async fn get_result(&self) -> Result<Vec<SearchResult>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.command_tx
+            .send(BrowserCommand::GetResult(tx))
             .await
             .map_err(|_| Error::ChannelClosed)?;
         rx.await.map_err(|_| Error::ResponseChannelClosed)
