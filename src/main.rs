@@ -1,3 +1,4 @@
+use std::env;
 use std::error::Error;
 use std::time::Duration;
 
@@ -7,16 +8,13 @@ use futures::StreamExt;
 
 mod search_queue;
 use search::print_search_results;
-use search_queue::SearchTaskQueue;
+use search_queue::{BrowserClient, BrowserServer, SearchTaskQueue};
 
 mod search;
 use search::{Engines, SearchTask};
 
-mod search_thread;
-
 mod browser_utils;
 use browser_utils::{connect_to_browser, make_new_tab};
-use search_thread::BrowserThread;
 
 async fn main_tokio_wiki() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // tracing_subscriber::fmt::init();
@@ -127,69 +125,29 @@ async fn test_search_queue() -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
-async fn test_search_thread() {
-    let port = 8928;
-    let browser_thread = match BrowserThread::new(port, None).await {
-        Ok(thread) => thread,
-        Err(e) => {
-            eprintln!("Failed to create browser thread: {:?}", e);
-            return;
-        }
-    };
-
-    browser_thread
-        .add_task(SearchTask {
-            engine: Engines::GoogleAlt,
-            query: "rust".into(),
-            args: None,
-        })
-        .await
-        .unwrap();
-
-    tokio::time::sleep(Duration::from_millis(1000)).await;
-
-    browser_thread
-        .add_task(SearchTask {
-            engine: Engines::GoogleAlt,
-            query: "python".into(),
-            args: None,
-        })
-        .await
-        .unwrap();
-
-    tokio::time::sleep(Duration::from_millis(1000)).await;
-
-    browser_thread
-        .add_task(SearchTask {
-            engine: Engines::GoogleAlt,
-            query: "golang".into(),
-            args: None,
-        })
-        .await
-        .unwrap();
-
-    tokio::time::sleep(Duration::from_millis(1000)).await;
-
-    browser_thread
-        .add_task(SearchTask {
-            engine: Engines::GoogleAlt,
-            query: "typescript".into(),
-            args: None,
-        })
-        .await
-        .unwrap();
-
-    let _ = browser_thread.wait_result_update().await;
-
-    let final_result = browser_thread.get_result().await.unwrap();
-    println!("result 0: {}", final_result[0].description);
-
-    browser_thread.shutdown().await.unwrap();
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let _ = test_search_thread().await;
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() > 1 {
+        match args[1].as_str() {
+            "queue" => {
+                test_search_queue().await?;
+            }
+            "server" => {
+                let _ = BrowserServer::new(8928, None, "/tmp/browser_socket".into())
+                    .await
+                    .start()
+                    .await;
+            }
+            "client" => {
+                let client = BrowserClient::new("/tmp/browser_socket".into());
+                let result = client.send_test().await.unwrap();
+                // println!("Client received: {}", result);
+            }
+            _ => {}
+        }
+    }
 
     Ok(())
 }
