@@ -172,6 +172,7 @@ pub enum BrowserRequest {
     WaitResultUpdate,
     GetResult,
     GetLastFinishedTaskId,
+    ResetFinishedTaskId,
     KeepAlive,
     Shutdown,
     Test,
@@ -180,11 +181,9 @@ pub enum BrowserRequest {
 #[derive(Serialize, Deserialize, Encode, Decode, Debug)]
 pub enum BrowserResponse {
     TaskId(u32),
-    ResultUpdateComplete,
     SearchResults(Vec<SearchResult>),
     LastFinishedTaskId(u32),
-    KeepAlive,
-    Shutdown,
+    OK,
     Error(String),
     Test,
 }
@@ -230,13 +229,19 @@ impl BrowserServer {
             BrowserRequest::AddTask(task) => {
                 BrowserResponse::TaskId(self.queue.add_task(task).await)
             }
-            BrowserRequest::WaitResultUpdate => BrowserResponse::ResultUpdateComplete,
+            BrowserRequest::WaitResultUpdate => BrowserResponse::OK,
             BrowserRequest::GetResult => BrowserResponse::SearchResults(self.queue.get_result()),
             BrowserRequest::GetLastFinishedTaskId => {
                 BrowserResponse::LastFinishedTaskId(self.queue.get_last_finished_task_id())
             }
-            BrowserRequest::KeepAlive => BrowserResponse::KeepAlive,
-            BrowserRequest::Shutdown => BrowserResponse::Shutdown,
+            BrowserRequest::ResetFinishedTaskId => {
+                self.queue
+                    .last_finished_task_id
+                    .store(1000, Ordering::SeqCst);
+                BrowserResponse::OK
+            }
+            BrowserRequest::KeepAlive => BrowserResponse::OK,
+            BrowserRequest::Shutdown => BrowserResponse::OK,
             BrowserRequest::Test => BrowserResponse::Test,
         };
 
@@ -246,7 +251,12 @@ impl BrowserServer {
     }
 
     pub async fn start(self) {
-        let _ = fs::remove_file(&self.socket_path).unwrap();
+        match fs::remove_file(&self.socket_path) {
+            Ok(_) => {
+                println!("Removed existing socket file");
+            }
+            Err(_) => {}
+        }
 
         let listener = tokio::net::UnixListener::bind(&self.socket_path).unwrap();
         loop {
@@ -307,7 +317,7 @@ impl BrowserClient {
     pub async fn wait_result_update(&self) -> Result<(), Box<dyn std::error::Error>> {
         let resp = self.send_request(BrowserRequest::WaitResultUpdate).await?;
         match resp {
-            BrowserResponse::ResultUpdateComplete => Ok(()),
+            BrowserResponse::OK => Ok(()),
             _ => Err("Invalid response".into()),
         }
     }
@@ -330,10 +340,20 @@ impl BrowserClient {
         }
     }
 
+    pub async fn reset_finished_task_id(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let resp = self
+            .send_request(BrowserRequest::ResetFinishedTaskId)
+            .await?;
+        match resp {
+            BrowserResponse::OK => Ok(()),
+            _ => Err("Invalid response".into()),
+        }
+    }
+
     pub async fn keep_alive(&self) -> Result<(), Box<dyn std::error::Error>> {
         let resp = self.send_request(BrowserRequest::KeepAlive).await?;
         match resp {
-            BrowserResponse::KeepAlive => Ok(()),
+            BrowserResponse::OK => Ok(()),
             _ => Err("Invalid response".into()),
         }
     }
@@ -341,7 +361,7 @@ impl BrowserClient {
     pub async fn shutdown(&self) -> Result<(), Box<dyn std::error::Error>> {
         let resp = self.send_request(BrowserRequest::Shutdown).await?;
         match resp {
-            BrowserResponse::Shutdown => Ok(()),
+            BrowserResponse::OK => Ok(()),
             _ => Err("Invalid response".into()),
         }
     }

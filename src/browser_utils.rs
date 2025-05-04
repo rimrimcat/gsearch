@@ -127,17 +127,21 @@ pub async fn inject_stealth(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     match evasions_scripts_path {
         Some(evasions_scripts_path) => {
-            #[cfg(debug_assertions)]
-            println!("Injecting stealth...");
+            if evasions_scripts_path.is_dir() {
+                #[cfg(debug_assertions)]
+                println!("Injecting stealth...");
 
-            for script in SCRIPTS.iter() {
-                page.execute(AddScriptToEvaluateOnNewDocumentParams {
-                    source: read_to_string(evasions_scripts_path.join(script)).unwrap(),
-                    include_command_line_api: None,
-                    world_name: None,
-                    run_immediately: true.into(),
-                })
-                .await?;
+                for script in SCRIPTS.iter() {
+                    page.execute(AddScriptToEvaluateOnNewDocumentParams {
+                        source: read_to_string(evasions_scripts_path.join(script)).unwrap(),
+                        include_command_line_api: None,
+                        world_name: None,
+                        run_immediately: true.into(),
+                    })
+                    .await?;
+                }
+            } else {
+                println!("evasions path specified but not a directory!");
             }
         }
         None => {
