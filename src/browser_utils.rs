@@ -127,6 +127,9 @@ pub async fn inject_stealth(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     match evasions_scripts_path {
         Some(evasions_scripts_path) => {
+            #[cfg(debug_assertions)]
+            println!("Injecting stealth...");
+
             for script in SCRIPTS.iter() {
                 page.execute(AddScriptToEvaluateOnNewDocumentParams {
                     source: read_to_string(evasions_scripts_path.join(script)).unwrap(),
@@ -137,16 +140,11 @@ pub async fn inject_stealth(
                 .await?;
             }
         }
-        None => {}
+        None => {
+            #[cfg(debug_assertions)]
+            println!("Not injecting stealth...");
+        }
     };
-
-    page.execute(SetUserAgentOverrideParams {
-        user_agent: get_chrome_rua().into(),
-        accept_language: None,
-        platform: None,
-        user_agent_metadata: None,
-    })
-    .await?;
 
     Ok(())
 }
