@@ -246,7 +246,12 @@ impl BrowserServer {
     }
 
     pub async fn start(self) {
-        let _ = fs::remove_file(&self.socket_path).unwrap();
+        match fs::remove_file(&self.socket_path) {
+            Ok(_) => {
+                println!("Removed existing socket file");
+            }
+            Err(_) => {}
+        }
 
         let listener = tokio::net::UnixListener::bind(&self.socket_path).unwrap();
         loop {
