@@ -2,9 +2,7 @@ use chromiumoxide::{
     Handler,
     browser::Browser,
     cdp::browser_protocol::{
-        network::SetUserAgentOverrideParams,
-        page::{AddScriptToEvaluateOnNewDocumentParams, CloseParams},
-        target::{CreateTargetParams, CreateTargetParamsBuilder},
+        network::SetUserAgentOverrideParams, page::AddScriptToEvaluateOnNewDocumentParams,
     },
     error::Result,
     page::Page,

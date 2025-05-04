@@ -50,10 +50,9 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     task_queue
         .add_task(SearchTask {
-            engine: Engines::Google,
+            engine: Engines::GoogleStealth,
             query: "rust".into(),
-            page: 1,
-            max_results: 10,
+            args: None,
         })
         .await;
 
@@ -61,10 +60,9 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     task_queue
         .add_task(SearchTask {
-            engine: Engines::Google,
+            engine: Engines::GoogleStealth,
             query: "python".into(),
-            page: 1,
-            max_results: 10,
+            args: None,
         })
         .await;
 
@@ -72,10 +70,9 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     task_queue
         .add_task(SearchTask {
-            engine: Engines::Google,
+            engine: Engines::GoogleStealth,
             query: "golang".into(),
-            page: 1,
-            max_results: 10,
+            args: None,
         })
         .await;
 
@@ -83,26 +80,23 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     task_queue
         .add_task(SearchTask {
-            engine: Engines::Google,
+            engine: Engines::GoogleStealth,
             query: "typescript".into(),
-            page: 1,
-            max_results: 10,
+            args: None,
         })
         .await;
 
     task_queue.wait_result_update().await;
-
     let final_result = task_queue.get_result();
-    println!("Final result description: {}", final_result[0].description);
+    println!("Final result len: {}", final_result.len());
 
     tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
 
     task_queue
         .add_task(SearchTask {
-            engine: Engines::Google,
+            engine: Engines::GoogleStealth,
             query: "sveltekit".into(),
-            page: 1,
-            max_results: 10,
+            args: None,
         })
         .await;
 
