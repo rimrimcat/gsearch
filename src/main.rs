@@ -6,6 +6,7 @@ use chromiumoxide::BrowserConfig;
 use futures::StreamExt;
 
 mod search_queue;
+use search::print_search_results;
 use search_queue::SearchTaskQueue;
 
 mod search;
@@ -136,54 +137,54 @@ async fn test_search_thread() {
         }
     };
 
-    // Test multiple searches
-    let queries = vec![
-        "Async programming in Rust",
-        "Tokio runtime",
-        "Browser automation",
-    ];
+    browser_thread
+        .add_task(SearchTask {
+            engine: Engines::GoogleAlt,
+            query: "rust".into(),
+            args: None,
+        })
+        .await
+        .unwrap();
 
-    for query in queries {
-        println!("Searching for: {}", query);
-        match browser_thread.search(query.to_string()).await {
-            Ok(results) => {
-                println!("Query '{}' returned {} results", query, results.len());
-            }
-            Err(e) => {
-                eprintln!("Search for '{}' failed: {:?}", query, e);
-            }
-        }
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
-        // Keep alive between searches
-        if let Err(e) = browser_thread.keep_alive().await {
-            eprintln!("Failed to keep browser alive: {:?}", e);
-            break;
-        }
+    browser_thread
+        .add_task(SearchTask {
+            engine: Engines::GoogleAlt,
+            query: "python".into(),
+            args: None,
+        })
+        .await
+        .unwrap();
 
-        // Small pause between searches
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    // Test timeout behavior by waiting for a while
-    println!("Testing timeout behavior (waiting for 10 seconds)");
-    tokio::time::sleep(Duration::from_secs(10)).await;
+    browser_thread
+        .add_task(SearchTask {
+            engine: Engines::GoogleAlt,
+            query: "golang".into(),
+            args: None,
+        })
+        .await
+        .unwrap();
 
-    // Try another search after waiting
-    match browser_thread.search("Final test query".to_string()).await {
-        Ok(results) => {
-            println!("Final search returned {} results", results.len());
-        }
-        Err(e) => {
-            eprintln!("Final search failed: {:?}", e);
-        }
-    }
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    // Shutdown the browser thread
-    if let Err(e) = browser_thread.shutdown().await {
-        eprintln!("Failed to shutdown browser thread: {:?}", e);
-    } else {
-        println!("Browser thread shutdown successfully");
-    }
+    browser_thread
+        .add_task(SearchTask {
+            engine: Engines::GoogleAlt,
+            query: "typescript".into(),
+            args: None,
+        })
+        .await
+        .unwrap();
+
+    let _ = browser_thread.wait_result_update().await;
+
+    let final_result = browser_thread.get_result().await.unwrap();
+    println!("result 0: {}", final_result[0].description);
+
+    browser_thread.shutdown().await.unwrap();
 }
 
 #[tokio::main]
