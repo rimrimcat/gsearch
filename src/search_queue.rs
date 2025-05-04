@@ -172,6 +172,7 @@ pub enum BrowserRequest {
     WaitResultUpdate,
     GetResult,
     GetLastFinishedTaskId,
+    ResetFinishedTaskId,
     KeepAlive,
     Shutdown,
     Test,
@@ -183,8 +184,7 @@ pub enum BrowserResponse {
     ResultUpdateComplete,
     SearchResults(Vec<SearchResult>),
     LastFinishedTaskId(u32),
-    KeepAlive,
-    Shutdown,
+    OK,
     Error(String),
     Test,
 }
@@ -235,8 +235,14 @@ impl BrowserServer {
             BrowserRequest::GetLastFinishedTaskId => {
                 BrowserResponse::LastFinishedTaskId(self.queue.get_last_finished_task_id())
             }
-            BrowserRequest::KeepAlive => BrowserResponse::KeepAlive,
-            BrowserRequest::Shutdown => BrowserResponse::Shutdown,
+            BrowserRequest::ResetFinishedTaskId => {
+                self.queue
+                    .last_finished_task_id
+                    .store(1000, Ordering::SeqCst);
+                BrowserResponse::OK
+            }
+            BrowserRequest::KeepAlive => BrowserResponse::OK,
+            BrowserRequest::Shutdown => BrowserResponse::OK,
             BrowserRequest::Test => BrowserResponse::Test,
         };
 
@@ -335,10 +341,20 @@ impl BrowserClient {
         }
     }
 
+    pub async fn reset_finished_task_id(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let resp = self
+            .send_request(BrowserRequest::ResetFinishedTaskId)
+            .await?;
+        match resp {
+            BrowserResponse::OK => Ok(()),
+            _ => Err("Invalid response".into()),
+        }
+    }
+
     pub async fn keep_alive(&self) -> Result<(), Box<dyn std::error::Error>> {
         let resp = self.send_request(BrowserRequest::KeepAlive).await?;
         match resp {
-            BrowserResponse::KeepAlive => Ok(()),
+            BrowserResponse::OK => Ok(()),
             _ => Err("Invalid response".into()),
         }
     }
@@ -346,7 +362,7 @@ impl BrowserClient {
     pub async fn shutdown(&self) -> Result<(), Box<dyn std::error::Error>> {
         let resp = self.send_request(BrowserRequest::Shutdown).await?;
         match resp {
-            BrowserResponse::Shutdown => Ok(()),
+            BrowserResponse::OK => Ok(()),
             _ => Err("Invalid response".into()),
         }
     }
