@@ -20,14 +20,14 @@ use crate::browser_utils::{
 #[derive(Debug, Clone)]
 pub enum Engines {
     Google,
-    GoogleStealth,
+    GoogleAlt,
 }
 
 impl Engines {
     pub fn url_template(&self) -> String {
         match self {
             Engines::Google => "Google".to_string(),
-            Engines::GoogleStealth => "GoogleStealth".to_string(),
+            Engines::GoogleAlt => "GoogleStealth".to_string(),
         }
     }
 
@@ -39,9 +39,7 @@ impl Engines {
     ) -> Vec<SearchResult> {
         let result = match self {
             Engines::Google => search_google(page, query, args.unwrap_or_default()).await,
-            Engines::GoogleStealth => {
-                search_google_stealth(page, query, args.unwrap_or_default()).await
-            }
+            Engines::GoogleAlt => search_google_alt(page, query, args.unwrap_or_default()).await,
         };
 
         match result {
@@ -250,7 +248,7 @@ pub fn is_captcha(fragment: &Html) -> bool {
     false
 }
 
-fn search_google_stealth_extract_url(input: String) -> Option<String> {
+fn google_alt_extract_url(input: String) -> Option<String> {
     let q_start = input.find("q=")?;
     let start_index = q_start + 2;
 
@@ -370,7 +368,7 @@ async fn search_google(
     Ok(search_results)
 }
 
-async fn search_google_stealth(
+async fn search_google_alt(
     page: &Page,
     query: String,
     args: SearchArguments,
@@ -432,9 +430,7 @@ async fn search_google_stealth(
 
     for element in main_body.select(&div_selector).take(max_results as usize) {
         let title = select_element_text(&element, "span.CVA68e");
-        let link = match search_google_stealth_extract_url(select_element_attr(
-            &element, "a.fuLhoc", "href",
-        )) {
+        let link = match google_alt_extract_url(select_element_attr(&element, "a.fuLhoc", "href")) {
             Some(_url) => _url,
             None => "".to_string(),
         };
