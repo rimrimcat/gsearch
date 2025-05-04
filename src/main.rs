@@ -1,18 +1,19 @@
 use std::error::Error;
 
-mod browser_utils;
-use browser_utils::connect_to_browser;
-use browser_utils::make_new_tab;
 use chromiumoxide::Browser;
 use chromiumoxide::BrowserConfig;
 use futures::StreamExt;
-use search::Engines;
-use search::SearchTask;
 
 mod search_queue;
 use search_queue::SearchTaskQueue;
 
 mod search;
+use search::{Engines, SearchTask};
+
+mod search_thread;
+
+mod browser_utils;
+use browser_utils::{connect_to_browser, make_new_tab};
 
 async fn main_tokio_wiki() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // tracing_subscriber::fmt::init();
