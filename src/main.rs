@@ -43,7 +43,7 @@ async fn main_tokio_wiki() -> Result<(), Box<dyn std::error::Error + Send + Sync
     Ok(())
 }
 
-pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
+pub async fn test_search_queue() -> Result<(), Box<dyn Error + Send + Sync>> {
     let use_stealth = true;
     let engine = match use_stealth {
         true => Engines::GoogleAlt,
@@ -125,7 +125,7 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let _ = new_test_search().await;
+    let _ = test_search_queue().await;
 
     Ok(())
 }
