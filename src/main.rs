@@ -138,14 +138,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 let _ = BrowserServer::new(
                     8928,
                     Some("src/evasions".into()),
-                    "/tmp/browser_socket".into(),
+                    "/tmp/gsearch.sock".into(),
                 )
                 .await
                 .start()
                 .await;
             }
             "client" => {
-                let client = BrowserClient::new("/tmp/browser_socket".into());
+                let client = BrowserClient::new("/tmp/gsearch.sock".into());
                 let result = client.send_test().await.unwrap();
                 // println!("Client received: {}", result);
             }
