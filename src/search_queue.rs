@@ -229,7 +229,16 @@ impl BrowserServer {
             BrowserRequest::AddTask(task) => {
                 BrowserResponse::TaskId(self.queue.add_task(task).await)
             }
-            BrowserRequest::WaitResultUpdate => BrowserResponse::OK,
+            BrowserRequest::WaitResultUpdate => {
+                let queue = self.queue.clone();
+                tokio::spawn(async move {
+                    queue.wait_result_update().await;
+                    encode_into_slice(BrowserResponse::OK, &mut buffer, standard()).unwrap();
+                    stream.write_all(&buffer).await.unwrap();
+                });
+
+                return;
+            }
             BrowserRequest::GetResult => BrowserResponse::SearchResults(self.queue.get_result()),
             BrowserRequest::GetLastFinishedTaskId => {
                 BrowserResponse::LastFinishedTaskId(self.queue.get_last_finished_task_id())
@@ -246,7 +255,6 @@ impl BrowserServer {
         };
 
         encode_into_slice(resp, &mut buffer, standard()).unwrap();
-
         stream.write_all(&buffer).await.unwrap();
     }
 
