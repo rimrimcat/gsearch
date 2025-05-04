@@ -42,15 +42,25 @@ async fn main_tokio_wiki() -> Result<(), Box<dyn std::error::Error + Send + Sync
 }
 
 pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let use_stealth = true;
+    let engine = match use_stealth {
+        true => Engines::GoogleStealth,
+        false => Engines::Google,
+    };
+    let evasions_scripts_path = match use_stealth {
+        true => Some("src/evasions".into()),
+        false => None,
+    };
+
     let bwrapper = connect_to_browser(8928).await?;
 
-    let pagew = make_new_tab(&bwrapper.browser, Some("src/evasions".into())).await?;
+    let pagew = make_new_tab(&bwrapper.browser, evasions_scripts_path).await?;
 
     let task_queue = SearchTaskQueue::new(pagew.page.clone());
 
     task_queue
         .add_task(SearchTask {
-            engine: Engines::GoogleStealth,
+            engine: engine.clone(),
             query: "rust".into(),
             args: None,
         })
@@ -60,7 +70,7 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     task_queue
         .add_task(SearchTask {
-            engine: Engines::GoogleStealth,
+            engine: engine.clone(),
             query: "python".into(),
             args: None,
         })
@@ -70,7 +80,7 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     task_queue
         .add_task(SearchTask {
-            engine: Engines::GoogleStealth,
+            engine: engine.clone(),
             query: "golang".into(),
             args: None,
         })
@@ -80,7 +90,7 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     task_queue
         .add_task(SearchTask {
-            engine: Engines::GoogleStealth,
+            engine: engine.clone(),
             query: "typescript".into(),
             args: None,
         })
@@ -94,7 +104,7 @@ pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     task_queue
         .add_task(SearchTask {
-            engine: Engines::GoogleStealth,
+            engine: engine.clone(),
             query: "sveltekit".into(),
             args: None,
         })

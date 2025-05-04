@@ -1,4 +1,5 @@
 use chromiumoxide::{error::Result, page::Page};
+use fake_user_agent::get_chrome_rua;
 use scraper::{Html, Selector};
 use std::collections::VecDeque;
 use std::error::Error;
@@ -374,6 +375,9 @@ async fn search_google_stealth(
     query: String,
     args: SearchArguments,
 ) -> Result<Vec<SearchResult>, Box<dyn Error + Send + Sync>> {
+    // IDK WHY, BUT RUNNING THIS MAKES YOU ACCESS AN ALTERNATIVE GOOGLE SITE?
+    page.set_user_agent(get_chrome_rua()).await?;
+
     let page_num = args.page;
     let max_results = args.max_results;
 
@@ -387,7 +391,7 @@ async fn search_google_stealth(
     };
 
     let query_link = format!(
-        "https://www.google.com/search?udm=14&dpr=1&q={}{}",
+        "https://www.google.com/search?dpr=1&q={}{}",
         query, start_page
     );
 
