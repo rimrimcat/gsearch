@@ -140,7 +140,7 @@ impl SearchTaskQueue {
         }
     }
 
-    pub async fn stop(&self) {
+    pub async fn stop(self) {
         {
             let mut queue = self.queue.lock().await;
             queue.clear();
@@ -150,6 +150,6 @@ impl SearchTaskQueue {
             self.is_running.store(false, Ordering::SeqCst);
             self.result_notify.notified().await;
         }
-        let _ = self.page.clone().close().await;
+        let _ = self.page.close().await;
     }
 }
