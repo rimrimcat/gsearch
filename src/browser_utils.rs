@@ -1,8 +1,19 @@
+use chromiumoxide::{
+    Handler,
+    browser::Browser,
+    cdp::browser_protocol::{
+        network::SetUserAgentOverrideParams,
+        page::{AddScriptToEvaluateOnNewDocumentParams, CloseParams},
+        target::{CreateTargetParams, CreateTargetParamsBuilder},
+    },
+    error::Result,
+    page::Page,
+};
 use fake_user_agent::get_chrome_rua;
-use headless_chrome::{Browser, LaunchOptionsBuilder, Tab};
+use futures::StreamExt;
 use scraper::Selector;
 use serde::Deserialize;
-use std::{collections::HashMap, error::Error, ffi::OsStr, sync::Arc, time::Instant};
+use std::{error::Error, ffi::OsStr, fs::read_to_string, sync::Arc, time::Instant};
 use tokio::spawn;
 
 #[derive(Debug, Deserialize)]
@@ -12,21 +23,49 @@ pub struct DevToolsInfo {
 }
 
 #[derive(Clone)]
-pub struct TabWrapper {
-    pub tab: Arc<Tab>,
+pub struct PageWrapper {
+    pub page: Page,
 }
 
-impl TabWrapper {
-    pub fn new(tab: Arc<Tab>) -> Self {
-        Self { tab }
+impl PageWrapper {
+    pub fn new(page: Page) -> Self {
+        Self { page }
+    }
+
+    pub async fn close(self) -> Result<()> {
+        self.page.close().await?;
+        Ok(())
     }
 }
 
-impl Drop for TabWrapper {
-    fn drop(&mut self) {
-        let _ = self.tab.close_target();
+pub struct BrowserWrapper {
+    pub browser: Arc<Browser>,
+}
+impl BrowserWrapper {
+    pub async fn new(browser: Arc<Browser>, mut handler: Handler) -> Self {
+        let handle = tokio::task::spawn(async move {
+            loop {
+                let _ = handler.next().await.unwrap();
+            }
+        });
+
+        Self { browser }
     }
 }
+
+static SCRIPTS: &[&str] = &[
+    "src/evasions/utils.js",
+    "src/evasions/chrome_app.js",
+    "src/evasions/chrome_runtime.js",
+    "src/evasions/iframe_content_window.js",
+    "src/evasions/media_codecs.js",
+    "src/evasions/navigator_language.js",
+    "src/evasions/navigator_permissions.js",
+    "src/evasions/navigator_plugins.js",
+    "src/evasions/webgl_vendor_override.js",
+    "src/evasions/window_outerdimensions.js",
+    "src/evasions/hairline_fix.js",
+];
 
 pub fn select_element_text(element: &scraper::element_ref::ElementRef, selector: &str) -> String {
     match element.select(&Selector::parse(selector).unwrap()).next() {
@@ -61,94 +100,105 @@ pub fn check_chromium() -> bool {
     false
 }
 
-pub fn spawn_browser() -> Result<Browser, Box<dyn Error + Send + Sync>> {
-    let default_options = LaunchOptionsBuilder::default()
-        .ignore_default_args(vec![OsStr::new("--enable-automation")])
-        .build()?;
-
-    Ok(Browser::new(default_options)?)
-}
-
-pub async fn connect_to_browser(port: u16) -> Result<Browser, Box<dyn Error + Send + Sync>> {
-    let fut = spawn(reqwest::get(format!(
-        "http://localhost:{}/json/version",
-        port
-    )))
-    .await?;
-
-    if fut.is_err() {
-        return spawn_browser();
-    }
-
-    let fut_json: Result<DevToolsInfo, reqwest::Error> = match fut {
-        Ok(_) => fut.unwrap().json().await,
-        Err(_) => return Err("Failed to connect to browser".into()),
-    };
-
-    let res = match fut_json {
-        Ok(_) => fut_json.unwrap() as DevToolsInfo,
-        Err(_) => return Err("Failed to connect to browser".into()),
-    };
-
-    let browser = Browser::connect(res.websocket_debugger_url)?;
-
-    Ok(browser)
-}
-
-pub fn make_new_tab(browser: &Browser) -> Result<TabWrapper, Box<dyn Error + Send + Sync>> {
+pub async fn connect_to_browser(port: u16) -> Result<BrowserWrapper, Box<dyn Error + Send + Sync>> {
     #[cfg(debug_assertions)]
-    println!("Creating new tab...");
+    println!("Connecting to browser...");
     #[cfg(debug_assertions)]
     let start = Instant::now();
 
-    let custom_user_agent = get_chrome_rua();
+    let tuple = Browser::connect(format!("http://localhost:{}", port)).await?;
 
-    let mut headers = HashMap::new();
-    headers.insert("User-Agent", custom_user_agent);
+    let bwrapper = BrowserWrapper::new(Arc::new(tuple.0), tuple.1).await;
 
-    let tab = browser.new_tab()?;
-    tab.set_extra_http_headers(headers)?;
-    tab.enable_stealth_mode()?;
+    #[cfg(debug_assertions)]
+    {
+        println!("{}ms: Connected to browser", start.elapsed().as_millis());
+        println!(
+            "Browser websocket url: {}",
+            bwrapper.browser.websocket_address()
+        );
+    }
+
+    Ok(bwrapper)
+}
+
+// taken from outdated package chromiumoxide_stealth
+pub async fn inject_stealth(page: &Page) -> Result<(), Box<dyn Error + Send + Sync>> {
+    for script in SCRIPTS.iter() {
+        page.execute(AddScriptToEvaluateOnNewDocumentParams {
+            source: read_to_string(script).unwrap(),
+            include_command_line_api: None,
+            world_name: None,
+            run_immediately: true.into(),
+        })
+        .await?;
+    }
+
+    page.execute(SetUserAgentOverrideParams {
+        user_agent: get_chrome_rua().into(),
+        accept_language: None,
+        platform: None,
+        user_agent_metadata: None,
+    })
+    .await?;
+
+    Ok(())
+}
+
+pub async fn make_new_tab(browser: &Browser) -> Result<PageWrapper, Box<dyn Error + Send + Sync>> {
+    #[cfg(debug_assertions)]
+    println!("Creating new page...");
+    #[cfg(debug_assertions)]
+    let start = Instant::now();
+
+    let page = browser.new_page("chrome://version/").await?;
+    #[cfg(debug_assertions)]
+    println!("{}ms: Page created", start.elapsed().as_millis());
+
+    inject_stealth(&page).await?;
 
     #[cfg(debug_assertions)]
     println!("Tab created in {}ms", start.elapsed().as_millis());
 
-    Ok(TabWrapper::new(tab))
+    Ok(PageWrapper::new(page))
 }
 
-pub fn make_or_take_nth_tab(
+pub async fn make_or_take_nth_tab(
     browser: &Browser,
     n: u16,
-) -> Result<TabWrapper, Box<dyn Error + Send + Sync>> {
+) -> Result<PageWrapper, Box<dyn Error + Send + Sync>> {
     #[cfg(debug_assertions)]
-    println!("Will make or take {}th tab...", n);
+    println!("Will make or take tab {}...", n);
     #[cfg(debug_assertions)]
     let start = Instant::now();
 
-    let custom_user_agent = get_chrome_rua();
-
-    let mut headers = HashMap::new();
-    headers.insert("User-Agent", custom_user_agent);
-
-    // need to run this to get the tabs
-    let _ = browser.new_tab()?.close_target()?;
+    let pages = browser.pages().await?;
+    let page_len = pages.len();
 
     let tab;
 
-    if browser.get_tabs().lock().unwrap().len() > n as usize {
-        tab = browser.get_tabs().lock().unwrap()[n as usize - 1].clone();
+    if page_len > n as usize {
+        tab = pages[n as usize].clone();
 
         #[cfg(debug_assertions)]
-        println!("Tab taken in {}ms", start.elapsed().as_millis());
+        println!(
+            "{}ms: Cloned and taken tab {}",
+            start.elapsed().as_millis(),
+            n
+        );
     } else {
-        tab = browser.new_tab()?;
+        tab = browser.new_page("chrome://version/").await?;
+        inject_stealth(&tab).await?;
 
         #[cfg(debug_assertions)]
-        println!("Tab created in {}ms", start.elapsed().as_millis());
+        println!("{}ms: Created new tab", start.elapsed().as_millis());
     }
 
-    tab.set_extra_http_headers(headers)?;
-    tab.enable_stealth_mode()?;
+    #[cfg(debug_assertions)]
+    println!(
+        "{}ms: make_or_take_nth_tab done",
+        start.elapsed().as_millis()
+    );
 
-    Ok(TabWrapper::new(tab))
+    Ok(PageWrapper::new(tab))
 }

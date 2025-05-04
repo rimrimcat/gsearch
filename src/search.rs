@@ -1,6 +1,5 @@
+use chromiumoxide::{error::Result, page::Page};
 use futures::future::join_all;
-use headless_chrome::Browser;
-use headless_chrome::Tab;
 use scraper::{Html, Selector};
 use std::collections::VecDeque;
 use std::error::Error;
@@ -16,7 +15,7 @@ use tokio::sync::{Mutex, Notify};
 use tokio::{spawn, task::JoinHandle};
 
 use crate::browser_utils::{
-    TabWrapper, connect_to_browser, make_new_tab, select_element_attr, select_element_text,
+    connect_to_browser, make_new_tab, select_element_attr, select_element_text,
 };
 
 #[derive(Debug, Clone)]
@@ -51,7 +50,7 @@ pub struct SearchResult {
 
 #[derive(Clone)]
 pub struct SearchTaskQueue {
-    tab: Arc<Tab>,
+    page: Page,
     queue: Arc<Mutex<VecDeque<QueuedSearchTask>>>,
     proc_notify: Arc<Notify>,
     result: Arc<RwLock<Vec<SearchResult>>>,
@@ -61,12 +60,9 @@ pub struct SearchTaskQueue {
 }
 
 impl SearchTaskQueue {
-    pub fn new(tab: Arc<Tab>) -> Self {
-        #[cfg(debug_assertions)]
-        println!("Browser and tab created.");
-
+    pub fn new(page: Page) -> Self {
         Self {
-            tab,
+            page,
             queue: Arc::new(Mutex::new(VecDeque::new())),
             proc_notify: Arc::new(Notify::new()),
             result: Arc::new(RwLock::new(Vec::new())),
@@ -89,7 +85,7 @@ impl SearchTaskQueue {
         }
 
         #[cfg(debug_assertions)]
-        println!("Task added to queue with id");
+        println!("Task added to queue");
 
         self.start_processor();
         id
@@ -140,8 +136,8 @@ impl SearchTaskQueue {
 
                 let __last_task_id = qtask.id;
 
-                let new_result = google_search(
-                    &self.tab,
+                let new_result = google_search_stealth(
+                    &self.page,
                     qtask.task.query,
                     qtask.task.page,
                     qtask.task.max_results,
@@ -188,7 +184,7 @@ impl SearchTaskQueue {
             self.is_running.store(false, Ordering::SeqCst);
             self.result_notify.notified().await;
         }
-        self.tab.close_target().unwrap();
+        let _ = self.page.clone().close().await;
     }
 }
 
@@ -208,18 +204,18 @@ pub fn is_captcha(fragment: &Html) -> bool {
 }
 
 async fn __google_search(
-    tab: &Arc<Tab>,
+    page: &Page,
     query: &str,
-    page: u32,
+    page_num: u32,
     max_results: u32, // must be within 1 and 10
-) -> Result<Vec<SearchResult>, Box<dyn Error>> {
-    let start_page = match page <= 1 {
+) -> Result<Vec<SearchResult>, Box<dyn Error + Send + Sync>> {
+    let start_page = match page_num <= 1 {
         true => "".to_string(),
-        false => format!("&start={}", ((page - 1) * 10).to_string()),
+        false => format!("&start={}", ((page_num - 1) * 10).to_string()),
     };
-    let page_num = match page <= 1 {
+    let page_num = match page_num <= 1 {
         true => 1,
-        false => page,
+        false => page_num,
     };
 
     let query_link = format!(
@@ -227,22 +223,28 @@ async fn __google_search(
         query, start_page
     );
 
-    tab.navigate_to(&query_link)?.wait_until_navigated()?;
+    page.goto(&query_link).await?;
 
-    let html_str = tab.get_content()?;
+    let html_str = page.wait_for_navigation().await?.content().await?;
+
     let html = Html::parse_document(&html_str);
 
     if is_captcha(&html) {
         #[cfg(debug_assertions)]
         println!("Captcha detected!");
 
+        // let cite = match page.url().await {
+        //     Ok(url) => url.unwrap(),
+        //     Err(_) => "".to_string(),
+        // };
+
         return Ok(vec![SearchResult {
-            title: "Captcha".to_string(),
-            link: query_link.to_string(),
-            cite: tab.get_url(),
-            image: "".to_string(),
-            description: "Cannot access due to captcha".to_string(),
-            updated: "".to_string(),
+            title: "Captcha".into(),
+            link: query_link.into(),
+            cite: "".into(),
+            image: "".into(),
+            description: "Cannot access due to captcha".into(),
+            updated: "".into(),
             page: page_num,
         }]);
     }
@@ -309,13 +311,120 @@ async fn __google_search(
     Ok(search_results)
 }
 
+fn google_stealth_extract_url(input: String) -> Option<String> {
+    let q_start = input.find("q=")?;
+    let start_index = q_start + 2;
+
+    let remaining = &input[start_index..];
+    let end_index = remaining.find('&')?;
+
+    Some(remaining[..end_index].to_string())
+}
+
+async fn __google_search_stealth(
+    page: &Page,
+    query: &str,
+    page_num: u32,
+    max_results: u32, // must be within 1 and 10
+) -> Result<Vec<SearchResult>, Box<dyn Error + Send + Sync>> {
+    let start_page = match page_num <= 1 {
+        true => "".to_string(),
+        false => format!("&start={}", ((page_num - 1) * 10).to_string()),
+    };
+    let page_num = match page_num <= 1 {
+        true => 1,
+        false => page_num,
+    };
+
+    let query_link = format!(
+        "https://www.google.com/search?udm=14&dpr=1&q={}{}",
+        query, start_page
+    );
+
+    page.goto(&query_link).await?;
+
+    let html_str = page.wait_for_navigation().await?.content().await?;
+
+    let html = Html::parse_document(&html_str);
+
+    if is_captcha(&html) {
+        #[cfg(debug_assertions)]
+        println!("Captcha detected!");
+
+        // let cite = match page.url().await {
+        //     Ok(url) => url.unwrap(),
+        //     Err(_) => "".to_string(),
+        // };
+
+        return Ok(vec![SearchResult {
+            title: "Captcha".into(),
+            link: query_link.into(),
+            cite: "".into(),
+            image: "".into(),
+            description: "Cannot access due to captcha".into(),
+            updated: "".into(),
+            page: page_num,
+        }]);
+    }
+
+    let main_body = html
+        .select(&Selector::parse("body").unwrap())
+        .next()
+        .unwrap();
+
+    let div_selector = Selector::parse("div.ezO2md").unwrap();
+
+    let mut search_results = Vec::new();
+
+    for element in main_body.select(&div_selector).take(max_results as usize) {
+        let title = select_element_text(&element, "span.CVA68e");
+        let link =
+            match google_stealth_extract_url(select_element_attr(&element, "a.fuLhoc", "href")) {
+                Some(_url) => _url,
+                None => "".to_string(),
+            };
+        let cite = select_element_text(&element, "span.qXLe6d.dXDvrc > span.fYyStc");
+        let description = select_element_text(&element, "span.qXLe6d.FrIlee > span.fYyStc");
+
+        let result = SearchResult {
+            title,
+            link,
+            cite,
+            image: "".into(),
+            description,
+            updated: "".into(),
+            page: page_num,
+        };
+
+        search_results.push(result);
+    }
+
+    Ok(search_results)
+}
+
 pub async fn google_search(
-    tab: &Arc<Tab>,
+    page: &Page,
     query: String,
-    page: u32,
+    page_num: u32,
     max_results: u32,
 ) -> Vec<SearchResult> {
-    let result = __google_search(&tab, &query, page, max_results).await;
+    let result = __google_search(&page, &query, page_num, max_results).await;
+
+    let ret = match result {
+        Ok(_) => result,
+        Err(_) => Ok(Vec::new()),
+    };
+
+    ret.unwrap()
+}
+
+pub async fn google_search_stealth(
+    page: &Page,
+    query: String,
+    page_num: u32,
+    max_results: u32,
+) -> Vec<SearchResult> {
+    let result = __google_search_stealth(&page, &query, page_num, max_results).await;
 
     let ret = match result {
         Ok(_) => result,
@@ -335,126 +444,6 @@ pub fn print_search_results(result: &Vec<SearchResult>) {
         println!("Updated: {}", res.updated);
         println!("----------");
     }
-}
-
-pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let browser = connect_to_browser(8928).await?;
-    let tabw = make_new_tab(&browser)?;
-
-    let task_queue = SearchTaskQueue::new(tabw.tab.clone());
-
-    task_queue
-        .add_task(SearchTask {
-            engine: Engines::Google,
-            query: "rust".into(),
-            page: 1,
-            max_results: 10,
-        })
-        .await;
-
-    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-
-    task_queue
-        .add_task(SearchTask {
-            engine: Engines::Google,
-            query: "python".into(),
-            page: 1,
-            max_results: 10,
-        })
-        .await;
-
-    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-
-    task_queue
-        .add_task(SearchTask {
-            engine: Engines::Google,
-            query: "golang".into(),
-            page: 1,
-            max_results: 10,
-        })
-        .await;
-
-    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
-
-    task_queue
-        .add_task(SearchTask {
-            engine: Engines::Google,
-            query: "typescript".into(),
-            page: 1,
-            max_results: 10,
-        })
-        .await;
-
-    task_queue.wait_result_update().await;
-
-    let final_result = task_queue.get_result();
-    println!("Final result description: {}", final_result[0].description);
-
-    tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
-
-    task_queue
-        .add_task(SearchTask {
-            engine: Engines::Google,
-            query: "sveltekit".into(),
-            page: 1,
-            max_results: 10,
-        })
-        .await;
-
-    task_queue.wait_result_update().await;
-
-    let final_result = task_queue.get_result();
-    println!("Task 5 result description: {}", final_result[0].description);
-
-    tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
-    // task_queue.stop().await;
-
-    Ok(())
-}
-
-// stuff
-pub async fn test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let browser = connect_to_browser(8928).await?;
-
-    let search_queries = vec![
-        ("rust", 1, 10),
-        // ("rusty", 1, 10),
-        // ("rust programming language", 1, 10),
-    ];
-
-    let mut tasks: Vec<JoinHandle<Vec<SearchResult>>> = Vec::new();
-
-    for (query, page, max_results) in search_queries.clone() {
-        let browser_ref = browser.clone();
-
-        let task = spawn(async move {
-            let tabw = make_new_tab(&browser_ref);
-            if tabw.is_err() {
-                return Vec::new();
-            }
-
-            google_search(&tabw.unwrap().tab, query.to_string(), page, max_results).await
-        });
-
-        tasks.push(task);
-    }
-
-    let results = join_all(tasks).await;
-
-    for (i, task_result) in results.into_iter().enumerate() {
-        match task_result {
-            Ok(search_results) => {
-                println!(
-                    "\n===== SEARCH RESULTS FOR: {} =====\n",
-                    search_queries[i].0
-                );
-                print_search_results(&search_results);
-            }
-            Err(e) => println!("Task {} panicked: {}", i, e),
-        }
-    }
-
-    Ok(())
 }
 
 pub async fn browser_check() -> Result<(), Box<dyn Error + Send + Sync>> {

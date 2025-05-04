@@ -1,7 +1,8 @@
 use abi_stable::std_types::{ROption, RString, RVec};
 use anyrun_plugin::*;
-use headless_chrome::Browser;
 use serde::Deserialize;
+use std::env;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::SeqCst;
 use std::thread::sleep;
@@ -11,8 +12,8 @@ use tokio::sync::Mutex;
 use tokio::sync::{Notify, RwLock};
 
 mod browser_utils;
-use browser_utils::TabWrapper;
 use browser_utils::connect_to_browser;
+use browser_utils::{BrowserWrapper, PageWrapper};
 
 mod search;
 use search::{Engines, SearchTask, SearchTaskQueue};
@@ -23,6 +24,7 @@ struct Config {
     port: u16,
     max_results: u32,
     type_max_delay: u32,
+    evasion_scripts_path: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -32,14 +34,15 @@ impl Default for Config {
             port: 8928,
             max_results: 3,
             type_max_delay: 400,
+            evasion_scripts_path: Some(PathBuf::from("~/.config/anyrun/evasions")),
         }
     }
 }
 
 struct State {
     config: Config,
-    browser: headless_chrome::Browser,
-    tabw: TabWrapper,
+    browser_wrapper: BrowserWrapper,
+    page_wrapper: PageWrapper,
     task_queue: SearchTaskQueue,
     last_stored_result: Arc<RwLock<RVec<Match>>>,
     result_notify: Arc<Notify>,
@@ -66,15 +69,29 @@ async fn init(config_dir: RString) -> State {
         Err(_) => Config::default(),
     };
 
+    match env::current_dir() {
+        Ok(path) => println!("Current working directory: {}", path.display()),
+        Err(e) => eprintln!("Error getting current directory: {}", e),
+    }
+
+    // check if evasion_scripts_path is set
+    if let Some(path) = &config.evasion_scripts_path {
+        println!("Evasion scripts path: {}", path.display());
+    } else {
+        println!("Evasion scripts path not set");
+    }
+
     let port = config.port;
-    let browser = connect_to_browser(port).await.unwrap();
-    let tabw = browser_utils::make_or_take_nth_tab(&browser.clone(), 2).unwrap();
-    let task_queue = SearchTaskQueue::new(tabw.tab.clone());
+    let browser_wrapper = connect_to_browser(port).await.unwrap();
+    let page_wrapper = browser_utils::make_or_take_nth_tab(&browser_wrapper.browser.clone(), 2)
+        .await
+        .unwrap();
+    let task_queue = SearchTaskQueue::new(page_wrapper.page.clone());
 
     State {
         config,
-        browser,
-        tabw,
+        browser_wrapper,
+        page_wrapper,
         task_queue,
         last_stored_result: Arc::new(RwLock::new(RVec::new())),
         result_notify: Arc::new(Notify::new()),
