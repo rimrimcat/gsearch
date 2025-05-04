@@ -1,19 +1,15 @@
 use abi_stable::std_types::{ROption, RString, RVec};
 use anyrun_plugin::*;
 use serde::Deserialize;
-use std::env;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering::SeqCst;
+use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 use std::thread::sleep;
 use std::time::Duration;
 use std::{fs, process::Command, sync::Arc};
-use tokio::sync::Mutex;
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 
 mod browser_utils;
-use browser_utils::connect_to_browser;
-use browser_utils::{BrowserWrapper, PageWrapper};
+use browser_utils::{BrowserWrapper, PageWrapper, connect_to_browser, make_or_take_nth_tab};
 
 mod search;
 use search::{Engines, SearchTask, SearchTaskQueue};
@@ -48,6 +44,7 @@ struct State {
     result_notify: Arc<Notify>,
     current_query: Arc<Mutex<String>>,
     has_result: Arc<AtomicBool>,
+    use_stealth: bool,
 }
 
 fn _typing() -> RVec<Match> {
@@ -69,23 +66,24 @@ async fn init(config_dir: RString) -> State {
         Err(_) => Config::default(),
     };
 
-    match env::current_dir() {
-        Ok(path) => println!("Current working directory: {}", path.display()),
-        Err(e) => eprintln!("Error getting current directory: {}", e),
-    }
-
-    // check if evasion_scripts_path is set
-    if let Some(path) = &config.evasion_scripts_path {
-        println!("Evasion scripts path: {}", path.display());
-    } else {
-        println!("Evasion scripts path not set");
-    }
+    let use_stealth = match &config.evasion_scripts_path {
+        Some(path) => path.is_dir(),
+        None => false,
+    };
 
     let port = config.port;
     let browser_wrapper = connect_to_browser(port).await.unwrap();
-    let page_wrapper = browser_utils::make_or_take_nth_tab(&browser_wrapper.browser.clone(), 2)
-        .await
-        .unwrap();
+    let page_wrapper = make_or_take_nth_tab(
+        &browser_wrapper.browser.clone(),
+        2,
+        if use_stealth {
+            config.evasion_scripts_path.clone()
+        } else {
+            None
+        },
+    )
+    .await
+    .unwrap();
     let task_queue = SearchTaskQueue::new(page_wrapper.page.clone());
 
     State {
@@ -97,6 +95,7 @@ async fn init(config_dir: RString) -> State {
         result_notify: Arc::new(Notify::new()),
         current_query: Arc::new(Mutex::new("".to_string())),
         has_result: Arc::new(AtomicBool::new(false)),
+        use_stealth,
     }
 }
 
