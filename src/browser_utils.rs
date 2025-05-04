@@ -13,7 +13,7 @@ use fake_user_agent::get_chrome_rua;
 use futures::StreamExt;
 use scraper::Selector;
 use serde::Deserialize;
-use std::{error::Error, ffi::OsStr, fs::read_to_string, sync::Arc, time::Instant};
+use std::{error::Error, ffi::OsStr, fs::read_to_string, path::PathBuf, sync::Arc, time::Instant};
 use tokio::spawn;
 
 #[derive(Debug, Deserialize)]
@@ -54,17 +54,17 @@ impl BrowserWrapper {
 }
 
 static SCRIPTS: &[&str] = &[
-    "src/evasions/utils.js",
-    "src/evasions/chrome_app.js",
-    "src/evasions/chrome_runtime.js",
-    "src/evasions/iframe_content_window.js",
-    "src/evasions/media_codecs.js",
-    "src/evasions/navigator_language.js",
-    "src/evasions/navigator_permissions.js",
-    "src/evasions/navigator_plugins.js",
-    "src/evasions/webgl_vendor_override.js",
-    "src/evasions/window_outerdimensions.js",
-    "src/evasions/hairline_fix.js",
+    "utils.js",
+    "chrome_app.js",
+    "chrome_runtime.js",
+    "iframe_content_window.js",
+    "media_codecs.js",
+    "navigator_language.js",
+    "navigator_permissions.js",
+    "navigator_plugins.js",
+    "webgl_vendor_override.js",
+    "window_outerdimensions.js",
+    "hairline_fix.js",
 ];
 
 pub fn select_element_text(element: &scraper::element_ref::ElementRef, selector: &str) -> String {
@@ -123,10 +123,13 @@ pub async fn connect_to_browser(port: u16) -> Result<BrowserWrapper, Box<dyn Err
 }
 
 // taken from outdated package chromiumoxide_stealth
-pub async fn inject_stealth(page: &Page) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub async fn inject_stealth(
+    page: &Page,
+    evasions_scripts_path: PathBuf,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     for script in SCRIPTS.iter() {
         page.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: read_to_string(script).unwrap(),
+            source: read_to_string(evasions_scripts_path.join(script)).unwrap(),
             include_command_line_api: None,
             world_name: None,
             run_immediately: true.into(),
@@ -145,7 +148,10 @@ pub async fn inject_stealth(page: &Page) -> Result<(), Box<dyn Error + Send + Sy
     Ok(())
 }
 
-pub async fn make_new_tab(browser: &Browser) -> Result<PageWrapper, Box<dyn Error + Send + Sync>> {
+pub async fn make_new_tab(
+    browser: &Browser,
+    evasions_scripts_path: Option<PathBuf>,
+) -> Result<PageWrapper, Box<dyn Error + Send + Sync>> {
     #[cfg(debug_assertions)]
     println!("Creating new page...");
     #[cfg(debug_assertions)]
@@ -155,7 +161,10 @@ pub async fn make_new_tab(browser: &Browser) -> Result<PageWrapper, Box<dyn Erro
     #[cfg(debug_assertions)]
     println!("{}ms: Page created", start.elapsed().as_millis());
 
-    inject_stealth(&page).await?;
+    match evasions_scripts_path {
+        Some(evasions_scripts_path) => inject_stealth(&page, evasions_scripts_path).await?,
+        None => (),
+    };
 
     #[cfg(debug_assertions)]
     println!("Tab created in {}ms", start.elapsed().as_millis());
@@ -166,6 +175,7 @@ pub async fn make_new_tab(browser: &Browser) -> Result<PageWrapper, Box<dyn Erro
 pub async fn make_or_take_nth_tab(
     browser: &Browser,
     n: u16,
+    evasions_scripts_path: Option<PathBuf>,
 ) -> Result<PageWrapper, Box<dyn Error + Send + Sync>> {
     #[cfg(debug_assertions)]
     println!("Will make or take tab {}...", n);
@@ -175,10 +185,10 @@ pub async fn make_or_take_nth_tab(
     let pages = browser.pages().await?;
     let page_len = pages.len();
 
-    let tab;
+    let page;
 
     if page_len > n as usize {
-        tab = pages[n as usize].clone();
+        page = pages[n as usize].clone();
 
         #[cfg(debug_assertions)]
         println!(
@@ -187,8 +197,12 @@ pub async fn make_or_take_nth_tab(
             n
         );
     } else {
-        tab = browser.new_page("chrome://version/").await?;
-        inject_stealth(&tab).await?;
+        page = browser.new_page("chrome://version/").await?;
+
+        match evasions_scripts_path {
+            Some(evasions_scripts_path) => inject_stealth(&page, evasions_scripts_path).await?,
+            None => (),
+        };
 
         #[cfg(debug_assertions)]
         println!("{}ms: Created new tab", start.elapsed().as_millis());
@@ -200,5 +214,5 @@ pub async fn make_or_take_nth_tab(
         start.elapsed().as_millis()
     );
 
-    Ok(PageWrapper::new(tab))
+    Ok(PageWrapper::new(page))
 }

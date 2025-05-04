@@ -44,7 +44,7 @@ async fn main_tokio_wiki() -> Result<(), Box<dyn std::error::Error + Send + Sync
 pub async fn new_test_search() -> Result<(), Box<dyn Error + Send + Sync>> {
     let bwrapper = connect_to_browser(8928).await?;
 
-    let pagew = make_new_tab(&bwrapper.browser).await?;
+    let pagew = make_new_tab(&bwrapper.browser, Some("src/evasions".into())).await?;
 
     let task_queue = SearchTaskQueue::new(pagew.page.clone());
 
