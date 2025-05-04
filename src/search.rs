@@ -1,5 +1,4 @@
 use chromiumoxide::{error::Result, page::Page};
-use futures::future::join_all;
 use scraper::{Html, Selector};
 use std::collections::VecDeque;
 use std::error::Error;
@@ -12,7 +11,6 @@ use std::sync::atomic::Ordering;
 use std::time::Instant;
 use sysinfo::System;
 use tokio::sync::{Mutex, Notify};
-use tokio::{spawn, task::JoinHandle};
 
 use crate::browser_utils::{
     connect_to_browser, make_new_tab, select_element_attr, select_element_text,
@@ -21,14 +19,64 @@ use crate::browser_utils::{
 #[derive(Debug, Clone)]
 pub enum Engines {
     Google,
+    GoogleStealth,
+}
+
+impl Engines {
+    pub fn url_template(&self) -> String {
+        match self {
+            Engines::Google => "Google".to_string(),
+            Engines::GoogleStealth => "GoogleStealth".to_string(),
+        }
+    }
+
+    pub async fn search(
+        &self,
+        page: &Page,
+        query: String,
+        args: Option<SearchArguments>,
+    ) -> Vec<SearchResult> {
+        let result = match self {
+            Engines::Google => search_google(page, query, args.unwrap_or_default()).await,
+            Engines::GoogleStealth => {
+                search_google_stealth(page, query, args.unwrap_or_default()).await
+            }
+        };
+
+        match result {
+            Ok(results) => results,
+            Err(_) => Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct SearchTask {
     pub engine: Engines,
     pub query: String,
+    pub args: Option<SearchArguments>,
+}
+
+#[derive(Debug)]
+pub struct SearchArguments {
     pub page: u32,
     pub max_results: u32,
+}
+
+impl SearchArguments {
+    pub fn new(page: u32, max_results: u32) -> Self {
+        Self { page, max_results }
+    }
+
+    pub fn default() -> Self {
+        Self::new(1, 10)
+    }
+}
+
+impl Default for SearchArguments {
+    fn default() -> Self {
+        Self::new(1, 10)
+    }
 }
 
 #[derive(Debug)]
@@ -136,13 +184,11 @@ impl SearchTaskQueue {
 
                 let __last_task_id = qtask.id;
 
-                let new_result = google_search_stealth(
-                    &self.page,
-                    qtask.task.query,
-                    qtask.task.page,
-                    qtask.task.max_results,
-                )
-                .await;
+                // Extract the needed parameters
+                let query = qtask.task.query;
+                let args = qtask.task.args;
+
+                let new_result = qtask.task.engine.search(&self.page, query, args).await;
 
                 {
                     let mut curr_result = self.result.write().unwrap();
@@ -152,10 +198,10 @@ impl SearchTaskQueue {
                 self.last_finished_task_id
                     .store(__last_task_id, Ordering::SeqCst);
 
-                self.result_notify.notify_waiters();
-
                 #[cfg(debug_assertions)]
                 println!("Search finished in {}ms", start.elapsed().as_millis());
+
+                self.result_notify.notify_waiters();
 
                 let mut queue = self.queue.lock().await;
                 if queue.len() > 1 {
@@ -203,12 +249,24 @@ pub fn is_captcha(fragment: &Html) -> bool {
     false
 }
 
-async fn __google_search(
+fn search_google_stealth_extract_url(input: String) -> Option<String> {
+    let q_start = input.find("q=")?;
+    let start_index = q_start + 2;
+
+    let remaining = &input[start_index..];
+    let end_index = remaining.find('&')?;
+
+    Some(remaining[..end_index].to_string())
+}
+
+async fn search_google(
     page: &Page,
-    query: &str,
-    page_num: u32,
-    max_results: u32, // must be within 1 and 10
+    query: String,
+    args: SearchArguments,
 ) -> Result<Vec<SearchResult>, Box<dyn Error + Send + Sync>> {
+    let page_num = args.page;
+    let max_results = args.max_results;
+
     let start_page = match page_num <= 1 {
         true => "".to_string(),
         false => format!("&start={}", ((page_num - 1) * 10).to_string()),
@@ -311,22 +369,14 @@ async fn __google_search(
     Ok(search_results)
 }
 
-fn google_stealth_extract_url(input: String) -> Option<String> {
-    let q_start = input.find("q=")?;
-    let start_index = q_start + 2;
-
-    let remaining = &input[start_index..];
-    let end_index = remaining.find('&')?;
-
-    Some(remaining[..end_index].to_string())
-}
-
-async fn __google_search_stealth(
+async fn search_google_stealth(
     page: &Page,
-    query: &str,
-    page_num: u32,
-    max_results: u32, // must be within 1 and 10
+    query: String,
+    args: SearchArguments,
 ) -> Result<Vec<SearchResult>, Box<dyn Error + Send + Sync>> {
+    let page_num = args.page;
+    let max_results = args.max_results;
+
     let start_page = match page_num <= 1 {
         true => "".to_string(),
         false => format!("&start={}", ((page_num - 1) * 10).to_string()),
@@ -378,11 +428,12 @@ async fn __google_search_stealth(
 
     for element in main_body.select(&div_selector).take(max_results as usize) {
         let title = select_element_text(&element, "span.CVA68e");
-        let link =
-            match google_stealth_extract_url(select_element_attr(&element, "a.fuLhoc", "href")) {
-                Some(_url) => _url,
-                None => "".to_string(),
-            };
+        let link = match search_google_stealth_extract_url(select_element_attr(
+            &element, "a.fuLhoc", "href",
+        )) {
+            Some(_url) => _url,
+            None => "".to_string(),
+        };
         let cite = select_element_text(&element, "span.qXLe6d.dXDvrc > span.fYyStc");
         let description = select_element_text(&element, "span.qXLe6d.FrIlee > span.fYyStc");
 
@@ -400,38 +451,6 @@ async fn __google_search_stealth(
     }
 
     Ok(search_results)
-}
-
-pub async fn google_search(
-    page: &Page,
-    query: String,
-    page_num: u32,
-    max_results: u32,
-) -> Vec<SearchResult> {
-    let result = __google_search(&page, &query, page_num, max_results).await;
-
-    let ret = match result {
-        Ok(_) => result,
-        Err(_) => Ok(Vec::new()),
-    };
-
-    ret.unwrap()
-}
-
-pub async fn google_search_stealth(
-    page: &Page,
-    query: String,
-    page_num: u32,
-    max_results: u32,
-) -> Vec<SearchResult> {
-    let result = __google_search_stealth(&page, &query, page_num, max_results).await;
-
-    let ret = match result {
-        Ok(_) => result,
-        Err(_) => Ok(Vec::new()),
-    };
-
-    ret.unwrap()
 }
 
 pub fn print_search_results(result: &Vec<SearchResult>) {

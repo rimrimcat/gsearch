@@ -2,9 +2,7 @@ use chromiumoxide::{
     Handler,
     browser::Browser,
     cdp::browser_protocol::{
-        network::SetUserAgentOverrideParams,
-        page::{AddScriptToEvaluateOnNewDocumentParams, CloseParams},
-        target::{CreateTargetParams, CreateTargetParamsBuilder},
+        network::SetUserAgentOverrideParams, page::AddScriptToEvaluateOnNewDocumentParams,
     },
     error::Result,
     page::Page,
@@ -125,17 +123,22 @@ pub async fn connect_to_browser(port: u16) -> Result<BrowserWrapper, Box<dyn Err
 // taken from outdated package chromiumoxide_stealth
 pub async fn inject_stealth(
     page: &Page,
-    evasions_scripts_path: PathBuf,
+    evasions_scripts_path: Option<PathBuf>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    for script in SCRIPTS.iter() {
-        page.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: read_to_string(evasions_scripts_path.join(script)).unwrap(),
-            include_command_line_api: None,
-            world_name: None,
-            run_immediately: true.into(),
-        })
-        .await?;
-    }
+    match evasions_scripts_path {
+        Some(evasions_scripts_path) => {
+            for script in SCRIPTS.iter() {
+                page.execute(AddScriptToEvaluateOnNewDocumentParams {
+                    source: read_to_string(evasions_scripts_path.join(script)).unwrap(),
+                    include_command_line_api: None,
+                    world_name: None,
+                    run_immediately: true.into(),
+                })
+                .await?;
+            }
+        }
+        None => {}
+    };
 
     page.execute(SetUserAgentOverrideParams {
         user_agent: get_chrome_rua().into(),
@@ -161,10 +164,7 @@ pub async fn make_new_tab(
     #[cfg(debug_assertions)]
     println!("{}ms: Page created", start.elapsed().as_millis());
 
-    match evasions_scripts_path {
-        Some(evasions_scripts_path) => inject_stealth(&page, evasions_scripts_path).await?,
-        None => (),
-    };
+    inject_stealth(&page, evasions_scripts_path).await?;
 
     #[cfg(debug_assertions)]
     println!("Tab created in {}ms", start.elapsed().as_millis());
@@ -199,10 +199,7 @@ pub async fn make_or_take_nth_tab(
     } else {
         page = browser.new_page("chrome://version/").await?;
 
-        match evasions_scripts_path {
-            Some(evasions_scripts_path) => inject_stealth(&page, evasions_scripts_path).await?,
-            None => (),
-        };
+        inject_stealth(&page, evasions_scripts_path).await?;
 
         #[cfg(debug_assertions)]
         println!("{}ms: Created new tab", start.elapsed().as_millis());
