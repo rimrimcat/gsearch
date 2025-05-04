@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::time::Duration;
 
 use chromiumoxide::Browser;
 use chromiumoxide::BrowserConfig;
@@ -14,6 +15,7 @@ mod search_thread;
 
 mod browser_utils;
 use browser_utils::{connect_to_browser, make_new_tab};
+use search_thread::BrowserThread;
 
 async fn main_tokio_wiki() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // tracing_subscriber::fmt::init();
@@ -44,7 +46,7 @@ async fn main_tokio_wiki() -> Result<(), Box<dyn std::error::Error + Send + Sync
     Ok(())
 }
 
-pub async fn test_search_queue() -> Result<(), Box<dyn Error + Send + Sync>> {
+async fn test_search_queue() -> Result<(), Box<dyn Error + Send + Sync>> {
     let use_stealth = true;
     let engine = match use_stealth {
         true => Engines::GoogleAlt,
@@ -124,9 +126,69 @@ pub async fn test_search_queue() -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
+async fn test_search_thread() {
+    let port = 8928;
+    let browser_thread = match BrowserThread::new(port, None).await {
+        Ok(thread) => thread,
+        Err(e) => {
+            eprintln!("Failed to create browser thread: {:?}", e);
+            return;
+        }
+    };
+
+    // Test multiple searches
+    let queries = vec![
+        "Async programming in Rust",
+        "Tokio runtime",
+        "Browser automation",
+    ];
+
+    for query in queries {
+        println!("Searching for: {}", query);
+        match browser_thread.search(query.to_string()).await {
+            Ok(results) => {
+                println!("Query '{}' returned {} results", query, results.len());
+            }
+            Err(e) => {
+                eprintln!("Search for '{}' failed: {:?}", query, e);
+            }
+        }
+
+        // Keep alive between searches
+        if let Err(e) = browser_thread.keep_alive().await {
+            eprintln!("Failed to keep browser alive: {:?}", e);
+            break;
+        }
+
+        // Small pause between searches
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    // Test timeout behavior by waiting for a while
+    println!("Testing timeout behavior (waiting for 10 seconds)");
+    tokio::time::sleep(Duration::from_secs(10)).await;
+
+    // Try another search after waiting
+    match browser_thread.search("Final test query".to_string()).await {
+        Ok(results) => {
+            println!("Final search returned {} results", results.len());
+        }
+        Err(e) => {
+            eprintln!("Final search failed: {:?}", e);
+        }
+    }
+
+    // Shutdown the browser thread
+    if let Err(e) = browser_thread.shutdown().await {
+        eprintln!("Failed to shutdown browser thread: {:?}", e);
+    } else {
+        println!("Browser thread shutdown successfully");
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let _ = test_search_queue().await;
+    let _ = test_search_thread().await;
 
     Ok(())
 }
