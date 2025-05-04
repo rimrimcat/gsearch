@@ -12,7 +12,7 @@ mod browser_utils;
 use browser_utils::{BrowserWrapper, PageWrapper, connect_to_browser, make_or_take_nth_tab};
 
 mod search;
-use search::{Engines, SearchTask, SearchTaskQueue};
+use search::{Engines, SearchArguments, SearchTask, SearchTaskQueue};
 
 #[derive(Deserialize)]
 struct Config {
@@ -69,6 +69,12 @@ async fn init(config_dir: RString) -> State {
     let use_stealth = match &config.evasion_scripts_path {
         Some(path) => path.is_dir(),
         None => false,
+    };
+
+    #[cfg(debug_assertions)]
+    match use_stealth {
+        true => println!("Using stealth mode"),
+        false => println!("Not using stealth mode"),
     };
 
     let port = config.port;
@@ -131,11 +137,15 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
     // check if typing
     *state.current_query.lock().await = input.clone();
 
+    #[cfg(debug_assertions)]
     println!("will sleep for {}ms", state.config.type_max_delay);
+
     sleep(Duration::from_millis(state.config.type_max_delay as u64));
 
     if *state.current_query.lock().await != input {
+        #[cfg(debug_assertions)]
         println!("Still typing, will resturn last stored result");
+
         if state.has_result.load(SeqCst) {
             return state.last_stored_result.read().await.clone();
         } else {
@@ -145,16 +155,20 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
         // return state.last_stored_result.read().await.clone();
     }
 
+    #[cfg(debug_assertions)]
     println!("will start task");
+
     let instant = std::time::Instant::now();
 
     let task_id = state
         .task_queue
         .add_task(SearchTask {
-            engine: Engines::Google,
+            engine: match state.use_stealth {
+                true => Engines::GoogleStealth,
+                false => Engines::Google,
+            },
             query: input.clone(),
-            page: 1,
-            max_results: state.config.max_results,
+            args: Some(SearchArguments::new(1, state.config.max_results)),
         })
         .await;
 
@@ -162,6 +176,7 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
 
     let last_task_id = state.task_queue.get_last_finished_task_id();
     if task_id > last_task_id {
+        #[cfg(debug_assertions)]
         println!(
             "TASK {}: waiting for result since > last_task_id {}",
             task_id, last_task_id
@@ -191,18 +206,21 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
             })
             .collect::<RVec<_>>();
 
-        println!(
-            "adding {} results, took {}ms",
-            final_results.len(),
-            instant.elapsed().as_millis()
-        );
-        println!(
-            "results {:?}",
-            results
-                .iter()
-                .map(|res| { res.description.clone() })
-                .collect::<Vec<String>>()
-        );
+        #[cfg(debug_assertions)]
+        {
+            println!(
+                "adding {} results, took {}ms",
+                final_results.len(),
+                instant.elapsed().as_millis()
+            );
+            println!(
+                "results {:?}",
+                results
+                    .iter()
+                    .map(|res| { res.description.clone() })
+                    .collect::<Vec<String>>()
+            );
+        }
 
         {
             let mut curr_result = state.last_stored_result.write().await;
@@ -215,12 +233,15 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
 
         state.result_notify.notify_waiters();
 
+        #[cfg(debug_assertions)]
         println!("notified and will return final results");
         return final_results;
     } else {
+        #[cfg(debug_assertions)]
         println!("waiting for result");
         state.result_notify.notified().await;
 
+        #[cfg(debug_assertions)]
         println!("returning last stored result");
         return state.last_stored_result.read().await.clone();
     }
