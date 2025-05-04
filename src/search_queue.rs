@@ -181,7 +181,6 @@ pub enum BrowserRequest {
 #[derive(Serialize, Deserialize, Encode, Decode, Debug)]
 pub enum BrowserResponse {
     TaskId(u32),
-    ResultUpdateComplete,
     SearchResults(Vec<SearchResult>),
     LastFinishedTaskId(u32),
     OK,
@@ -230,7 +229,7 @@ impl BrowserServer {
             BrowserRequest::AddTask(task) => {
                 BrowserResponse::TaskId(self.queue.add_task(task).await)
             }
-            BrowserRequest::WaitResultUpdate => BrowserResponse::ResultUpdateComplete,
+            BrowserRequest::WaitResultUpdate => BrowserResponse::OK,
             BrowserRequest::GetResult => BrowserResponse::SearchResults(self.queue.get_result()),
             BrowserRequest::GetLastFinishedTaskId => {
                 BrowserResponse::LastFinishedTaskId(self.queue.get_last_finished_task_id())
@@ -318,7 +317,7 @@ impl BrowserClient {
     pub async fn wait_result_update(&self) -> Result<(), Box<dyn std::error::Error>> {
         let resp = self.send_request(BrowserRequest::WaitResultUpdate).await?;
         match resp {
-            BrowserResponse::ResultUpdateComplete => Ok(()),
+            BrowserResponse::OK => Ok(()),
             _ => Err("Invalid response".into()),
         }
     }
