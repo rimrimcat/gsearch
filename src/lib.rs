@@ -228,6 +228,6 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
 fn info() -> PluginInfo {
     PluginInfo {
         name: "GSearch".into(),
-        icon: "web-browser".into(),
+        icon: "internet-web-browser".into(),
     }
 }
