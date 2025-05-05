@@ -7,7 +7,7 @@ use std::ffi::OsStr;
 use std::time::Instant;
 use sysinfo::System;
 
-use crate::browser_utils::{select_element_attr, select_element_text};
+use crate::browser_utils::{has_element, select_element_attr, select_element_text};
 
 #[derive(Debug, Serialize, Deserialize, Decode, Encode, Clone)]
 pub enum Engines {
@@ -304,7 +304,14 @@ async fn search_google_alt(
 
     let mut search_results = Vec::new();
 
-    for element in main_body.select(&div_selector).take(max_results as usize) {
+    for element in main_body
+        .select(&div_selector)
+        .take(max_results as usize + 1)
+    {
+        if !has_element(&element, "div.ezO2md > div > div > a.fuLhoc.ZWRArf") {
+            continue;
+        }
+
         #[cfg(debug_assertions)]
         println!(
             "{}ms: Extracting result {}",
@@ -331,6 +338,10 @@ async fn search_google_alt(
         };
 
         search_results.push(result);
+
+        if search_results.len() >= max_results as usize {
+            break;
+        }
     }
 
     #[cfg(debug_assertions)]

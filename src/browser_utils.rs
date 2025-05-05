@@ -65,6 +65,13 @@ static SCRIPTS: &[&str] = &[
     "hairline_fix.js",
 ];
 
+pub fn has_element(element: &scraper::element_ref::ElementRef, selector: &str) -> bool {
+    element
+        .select(&Selector::parse(selector).unwrap())
+        .next()
+        .is_some()
+}
+
 pub fn select_element_text(element: &scraper::element_ref::ElementRef, selector: &str) -> String {
     match element.select(&Selector::parse(selector).unwrap()).next() {
         Some(sel) => sel.text().collect::<Vec<_>>().join(""),
