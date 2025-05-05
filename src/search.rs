@@ -72,12 +72,26 @@ impl Default for SearchArguments {
 
 #[derive(Debug, Serialize, Deserialize, Decode, Encode, Clone)]
 pub struct SearchResult {
+    /// Page title
     pub title: String,
+
+    /// Link to page
     pub link: String,
+
+    /// Cite class as in google
+    /// Example: en.wikipedia.org › wiki › Tower
     pub cite: String,
+
+    /// Image url/b64
     pub image: String,
+
+    /// Page description
     pub description: String,
+
+    /// Last modified/updated
     pub updated: String,
+
+    /// Page number
     pub page: u32,
 }
 
@@ -306,7 +320,7 @@ async fn search_google_alt(
 
     for element in main_body
         .select(&div_selector)
-        .take(max_results as usize + 1)
+        .take(max_results as usize + 2)
     {
         if !has_element(&element, "div.ezO2md > div > div > a.fuLhoc.ZWRArf") {
             continue;
@@ -325,7 +339,10 @@ async fn search_google_alt(
             None => "".to_string(),
         };
         let cite = select_element_text(&element, "span.qXLe6d.dXDvrc > span.fYyStc");
-        let description = select_element_text(&element, "span.qXLe6d.FrIlee > span.fYyStc");
+        let description =
+            select_element_text(&element, "span.qXLe6d.FrIlee > span.fYyStc:not(.YVIcad)");
+
+        let updated = select_element_text(&element, "span.qXLe6d.FrIlee > span.fYyStc.YVIcad");
 
         let result = SearchResult {
             title,
@@ -333,7 +350,7 @@ async fn search_google_alt(
             cite,
             image: "".into(),
             description,
-            updated: "".into(),
+            updated,
             page: page_num,
         };
 
