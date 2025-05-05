@@ -9,44 +9,39 @@ use std::{fs, process::Command, sync::Arc};
 use tokio::sync::{Mutex, Notify, RwLock};
 
 mod browser_utils;
-use browser_utils::{
-    BrowserWrapper, PageWrapper, connect_to_browser, make_new_tab, make_or_take_nth_tab,
-};
 
 mod search;
-use search::{Engines, SearchArguments, SearchTask, SearchTaskQueue};
+use search::{Engines, SearchArguments, SearchTask};
+
+mod search_queue;
+use search_queue::BrowserClient;
 
 #[derive(Deserialize)]
 struct Config {
     prefix: String,
-    port: u16,
     max_results: u32,
     type_max_delay: u32,
-    evasion_scripts_path: Option<PathBuf>,
+    socket_path: PathBuf,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
             prefix: "@".to_string(),
-            port: 8928,
             max_results: 3,
             type_max_delay: 400,
-            evasion_scripts_path: Some(PathBuf::from("~/.config/anyrun/evasions")),
+            socket_path: PathBuf::from("/tmp/gsearch.sock"),
         }
     }
 }
 
 struct State {
     config: Config,
-    browser_wrapper: BrowserWrapper,
-    page_wrapper: PageWrapper,
-    task_queue: SearchTaskQueue,
+    gsearch_client: BrowserClient,
     last_stored_result: Arc<RwLock<RVec<Match>>>,
     result_notify: Arc<Notify>,
     current_query: Arc<Mutex<String>>,
     has_result: Arc<AtomicBool>,
-    use_stealth: bool,
 }
 
 fn _typing() -> RVec<Match> {
@@ -68,41 +63,16 @@ async fn init(config_dir: RString) -> State {
         Err(_) => Config::default(),
     };
 
-    let use_stealth = match &config.evasion_scripts_path {
-        Some(path) => path.is_dir(),
-        None => false,
-    };
-
-    #[cfg(debug_assertions)]
-    match use_stealth {
-        true => println!("Using stealth mode"),
-        false => println!("Not using stealth mode"),
-    };
-
-    let port = config.port;
-    let browser_wrapper = connect_to_browser(port).await.unwrap();
-    let page_wrapper = make_new_tab(
-        &browser_wrapper.browser.clone(),
-        if use_stealth {
-            config.evasion_scripts_path.clone()
-        } else {
-            None
-        },
-    )
-    .await
-    .unwrap();
-    let task_queue = SearchTaskQueue::new(page_wrapper.page.clone());
+    let gsearch_client = BrowserClient::new(config.socket_path.clone());
+    let _ = gsearch_client.reset_finished_task_id().await;
 
     State {
         config,
-        browser_wrapper,
-        page_wrapper,
-        task_queue,
+        gsearch_client,
         last_stored_result: Arc::new(RwLock::new(RVec::new())),
         result_notify: Arc::new(Notify::new()),
         current_query: Arc::new(Mutex::new("".to_string())),
         has_result: Arc::new(AtomicBool::new(false)),
-        use_stealth,
     }
 }
 
@@ -162,30 +132,39 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
     let instant = std::time::Instant::now();
 
     let task_id = state
-        .task_queue
+        .gsearch_client
         .add_task(SearchTask {
             engine: Engines::GoogleAlt,
             query: input.clone(),
             args: Some(SearchArguments::new(1, state.config.max_results)),
         })
-        .await;
+        .await
+        .unwrap();
 
-    let _ = &state.task_queue.wait_result_update().await;
+    let _ = &state.gsearch_client.wait_result_update().await;
 
-    let last_task_id = state.task_queue.get_last_finished_task_id();
+    let last_task_id = state
+        .gsearch_client
+        .get_last_finished_task_id()
+        .await
+        .unwrap();
     if task_id > last_task_id {
         #[cfg(debug_assertions)]
         println!(
             "TASK {}: waiting for result since > last_task_id {}",
             task_id, last_task_id
         );
-        let _ = &state.task_queue.wait_result_update().await;
+        let _ = &state.gsearch_client.wait_result_update().await;
     }
 
-    let last_task_id = state.task_queue.get_last_finished_task_id();
+    let last_task_id = state
+        .gsearch_client
+        .get_last_finished_task_id()
+        .await
+        .unwrap();
 
     if task_id == last_task_id {
-        let results = &state.task_queue.get_result();
+        let results = &state.gsearch_client.get_result().await.unwrap();
 
         let final_results = results
             .iter()
