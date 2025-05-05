@@ -171,9 +171,9 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
             .enumerate()
             .map(|(i, res)| Match {
                 title: format!(
-                    "{} \n <span weight='bold'>{}</span> ",
+                    "{}\n<b>{}</b>",
                     res.description.clone(),
-                    res.title.clone()
+                    res.title.clone().replace("&", "&amp;")
                 )
                 .into(),
                 description: ROption::RSome(res.link.clone().into()),
