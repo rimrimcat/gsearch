@@ -171,7 +171,7 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
             .enumerate()
             .map(|(i, res)| Match {
                 title: format!(
-                    "{}\n<span weight=\"bold\">{}</span>",
+                    "{} \n <span weight='bold'>{}</span> ",
                     res.description.clone(),
                     res.title.clone()
                 )
@@ -228,6 +228,6 @@ async fn get_matches(input: RString, state: &State) -> RVec<Match> {
 fn info() -> PluginInfo {
     PluginInfo {
         name: "GSearch".into(),
-        icon: "help-about".into(),
+        icon: "web-browser".into(),
     }
 }
