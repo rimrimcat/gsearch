@@ -267,7 +267,7 @@ async fn search_google_alt(
 
     let start_page = match page_num <= 1 {
         true => "".to_string(),
-        false => format!("&start={}", ((page_num - 1) * 10).to_string()),
+        false => format!("&start={}", ((page_num - 1) * 10)),
     };
     let page_num = match page_num <= 1 {
         true => 1,

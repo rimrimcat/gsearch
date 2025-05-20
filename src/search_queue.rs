@@ -259,11 +259,8 @@ impl BrowserServer {
     }
 
     pub async fn start(self) {
-        match fs::remove_file(&self.socket_path) {
-            Ok(_) => {
-                println!("Removed existing socket file");
-            }
-            Err(_) => {}
+        if fs::remove_file(&self.socket_path).is_ok() {
+            println!("Removed existing socket file");
         }
 
         let listener = tokio::net::UnixListener::bind(&self.socket_path).unwrap();
@@ -300,7 +297,7 @@ impl BrowserClient {
 
         stream.write_all(&buffer).await?;
         stream.readable().await?;
-        stream.read(&mut buffer).await?;
+        stream.read_exact(&mut buffer).await?;
 
         let (resp, _): (BrowserResponse, usize) = decode_from_slice(&buffer, standard()).unwrap();
 
